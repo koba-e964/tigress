@@ -1,6 +1,6 @@
-Y = TigressLexer.x
-YH = TigressLexer.hsx
-YHS = TigressLexer.hs
+Y = TigressLexer.x TigressParser.y
+YH = TigressLexer.hsx TigressParser.hsy
+YHS = TigressLexer.hs TigressParser.hs
 OBJS = TigressLexer.o TigressToken.o
 EXEC = mtigress
 
