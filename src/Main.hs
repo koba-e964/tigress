@@ -5,6 +5,8 @@ module Main where
 import TigressToken
 import TigressLexer as TL
 import TigressParser as TP
+import TigressEval as TE
+import System.IO
 
 str :: String
 str = "let var N := 8 " ++ 
@@ -17,8 +19,23 @@ str = "let var N := 8 " ++
 
 
 main :: IO ()
-main = do
-    let toks = TL.alexScanTokens str
-    print toks
-    print $ TP.tparse toks
+main = repl
+
+repl :: IO ()
+repl = do
+    hSetBuffering stdout NoBuffering
+    putStr "> "
+    line <- getLine
+    let toks = TL.alexScanTokens line
+    let exprOrErr = TP.tparse toks
+    case exprOrErr of
+       Left err -> print err >> return ()
+       Right expr -> do
+        print expr
+        res <- runTigress $ TE.eval expr
+        case res of
+            Left err  -> print err >> return ()
+            Right val -> do
+                putStrLn $ "- : ???\n" ++ show val
+                repl
 

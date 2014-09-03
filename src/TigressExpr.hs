@@ -1,6 +1,8 @@
 {-# LANGUAGE BangPatterns #-}
 module TigressExpr where
 
+import Data.Map (Map)
+
 data Expr = 
   EStr !String -- not used in Tigress. This constructor is prepared for future extension.
   | EInt !Integer
@@ -67,5 +69,13 @@ data VarDec =
 
 data FunDec = FunDec !Id ![TypeField] !(Maybe TypeId) !Expr deriving Show
 
+-- value for tigress.
 
+data Value = 
+  VInt Integer
+  | VStr String
+  | VRec (Map String Value)
+  | VNil
+  | VNone -- This shows that no values are returned.
+  deriving Show
 
