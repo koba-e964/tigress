@@ -21,17 +21,17 @@ data Expr =
   | EFor !Id !Expr !Expr !Expr
   | EBreak
   | ELet ![Dec] ![Expr]
-  deriving (Show)
+  deriving (Eq, Show)
 
 data Field =
-  Field !Id !Expr deriving Show
+  Field !Id !Expr deriving (Eq, Show)
 
 data LValue =
   LId !Id
   | LMem !LValue !Id
   | LIdx !LValue !Expr
-   deriving Show
-newtype Id = Id String deriving Show
+   deriving (Eq, Show)
+newtype Id = Id String deriving (Eq, Show)
 
 data BinOp =
  BAdd
@@ -46,28 +46,28 @@ data BinOp =
  | BGe
  | BAnd
  | BOr
-   deriving Show
+   deriving (Eq, Show)
 
 -- declarations
 data Dec =
   DType !TypeDec
   | DVar !VarDec
   | DFun !FunDec
-   deriving Show
-data TypeDec = TypeDec !TypeId !Type deriving Show
+   deriving (Eq, Show)
+data TypeDec = TypeDec !TypeId !Type deriving (Eq, Show)
 data Type = 
   TId !TypeId
   | TFields ![TypeField]
   | TAry !TypeId
-   deriving Show
-data TypeField = TypeField !Id !TypeId deriving Show
+   deriving (Eq, Show)
+data TypeField = TypeField !Id !TypeId deriving (Eq, Show)
 
-newtype TypeId = TypeId String deriving Show
+newtype TypeId = TypeId String deriving (Eq, Show)
 
 data VarDec = 
-  VarDec !Id !(Maybe TypeId) !Expr deriving Show -- type-id can be Nothing.
+  VarDec !Id !(Maybe TypeId) !Expr deriving (Eq, Show) -- type-id can be Nothing.
 
-data FunDec = FunDec !Id ![TypeField] !(Maybe TypeId) !Expr deriving Show
+data FunDec = FunDec !Id ![TypeField] !(Maybe TypeId) !Expr deriving (Eq, Show)
 
 -- value for tigress.
 
@@ -77,5 +77,5 @@ data Value =
   | VRec (Map String Value)
   | VNil
   | VNone -- This shows that no values are returned.
-  deriving Show
+  deriving (Eq, Show)
 
