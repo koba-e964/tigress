@@ -61,14 +61,69 @@ ID {ID $$}
 INT {INT $$}
 
 %%
+{-
+
+operator precedence:
+- (unary)
+* /
++ -
+= <> > < >= <=
+&
+|
+:=
+
+-}
 
 expr:
+oexpr0  { $1 }
+;
+
+oexpr0: -- ":="
+  oexpr1             { $1 }
+| lvalue ":=" oexpr1 {EAsgn $1 $3 }
+;
+
+oexpr1: -- "|"
+  oexpr2  { $1 }
+| oexpr1 "|" oexpr2 { EBin BOr $1 $3 }
+;
+
+oexpr2: -- "&"
+  oexpr3  { $1 }
+| oexpr2 "&" oexpr3 { EBin BAnd $1 $3 }
+;
+
+oexpr3: -- comparison
+  oexpr4  { $1 }
+| oexpr4 "=" oexpr4 { EBin BEq $1 $3 }
+| oexpr4 "<>" oexpr4 { EBin BNeq $1 $3 }
+| oexpr4 ">" oexpr4 { EBin BGt $1 $3 }
+| oexpr4 "<" oexpr4 { EBin BLt $1 $3 }
+| oexpr4 ">=" oexpr4 { EBin BGe $1 $3 }
+| oexpr4 "<=" oexpr4 { EBin BLe $1 $3 }
+;
+
+oexpr4: -- "+" "-"
+  oexpr5  { $1 }
+| oexpr4 "+" oexpr5 { EBin BAdd $1 $3 }
+| oexpr4 "-" oexpr5 { EBin BSub $1 $3 }
+;
+
+oexpr5: -- "*" "/"
+  oexpr6  { $1 }
+| oexpr5 "*" oexpr6 { EBin BMul $1 $3 }
+| oexpr5 "/" oexpr6 { EBin BDiv $1 $3 }
+;
+
+oexpr6: -- unary "-"
+  simpl_expr  { $1 }
+| "-" oexpr6 { EMinus $2 }
+;
+
+simpl_expr:
   INT  { EInt $1 }
 | NIL  { ENil }
 | lvalue { ELValue $1 }
-| "-" expr { EMinus $2 }
-| expr binary_operator expr { EBin $2 $1 $3 }
-| lvalue ":=" expr {EAsgn $1 $3 }
 | id "(" ")" { EApp $1 [] }
 | id "(" expr_list ")" { EApp $1 $3 }
 | "(" expr_seq ")" { ESeq $2 }
@@ -82,6 +137,7 @@ expr:
 | LET declaration_list IN END          { ELet $2 [] }
 | LET declaration_list IN expr_seq END { ELet $2 $4 }
 ;
+
 
 expr_seq:
   expr  { [$1] }
