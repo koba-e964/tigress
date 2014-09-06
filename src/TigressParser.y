@@ -204,21 +204,6 @@ id: ID { Id $1 };
 
 type_id: ID { TypeId $1 };
 
-binary_operator:
-  "+"  { BAdd }
-| "-"  { BSub }
-| "*"  { BMul }
-| "/"  { BDiv }
-| "="  { BEq  }
-| "<>" { BNeq }
-| "<"  { BLt  }
-| "<=" { BLe  }
-| ">"  { BGt  }
-| ">=" { BGe  }
-| "&"  { BAnd }
-| "|"  { BOr  }
-;
-
 {
 
 parseError :: [TigressToken] -> Either String a
