@@ -67,10 +67,14 @@ testsLogic :: TF.Test
 testsLogic = TF.testGroup "eval_logic" [
   evalCheck "eval_and1" "2 & 3"   (VInt 1)
   ,evalCheck "eval_and2" "0 & 1/0"   (VInt 0) -- & is lazy and does not evaluate 1/0
+  ,evalCheck "eval_and3" "2 & 0"   (VInt 0)
   ,evalCheck "eval_or1" "2 | 0"   (VInt 1)
-  ,evalCheck "eval_or2" "1 | 1/0"   (VInt 0) -- | is lazy and does not evaluate 1/0
+  ,evalCheck "eval_or2" "1 | 1/0"   (VInt 1) -- | is lazy and does not evaluate 1/0
+  ,evalCheck "eval_or3" "0 | 100"   (VInt 1)
+  ,evalCheck "eval_or4" "0 | 0"   (VInt 0)
  ]
 testsLet :: TF.Test
 testsLet = TF.testGroup "eval_let" [
   evalCheck "eval_let1" "let var a := 1 in a + 2 end" (VInt 3)
+  ,evalCheck "eval_let2" "let var a := 1 function b (i:int) : int = i + i in b(a) + 2 end" (VInt 4)
  ]

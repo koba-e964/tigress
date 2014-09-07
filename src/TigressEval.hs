@@ -10,9 +10,11 @@ import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 
 type Pos = Int -- the position of variable
+type PosMap = Map String Pos
+
 
 data TigState = TigState {
-    posmap :: Map String Pos,
+    posmap :: PosMap,
     varmap :: Map Pos Value,
     count  :: Int
 } deriving Show
@@ -70,13 +72,39 @@ eval (EMinus e) = do
   iv <- ensureInt v
   return $ VInt (- iv)
 eval (EBin op e1 e2) = do
-  i1 <- ensureInt =<< eval e1
-  i2 <- ensureInt =<< eval e2
-  let ops = [(BAdd,(+)), (BSub,(-)), (BMul,(*)), (BDiv,div), (BEq,bToI (==)), (BNeq,bToI (/=)), (BGt,bToI (>)), (BLt,bToI (<)),
-       (BGe,bToI (>=)), (BLe,bToI (<=))] :: [(BinOp, Integer->Integer->Integer)]
-  let opInt = fromMaybe undefined (lookup op ops)
-  return $ VInt $ opInt i1 i2
-   where bToI op x y = if op x y then 1 else 0
+  case op of
+    BAnd -> iand e1 e2
+    BOr  -> ior e1 e2
+    BDiv -> idiv e1 e2
+    _    -> do
+      i1 <- ensureInt =<< eval e1
+      i2 <- ensureInt =<< eval e2
+      let ops = [(BAdd,(+)), (BSub,(-)), (BMul,(*)), (BEq,bToI (==)), (BNeq,bToI (/=)), (BGt,bToI (>)), (BLt,bToI (<)),
+           (BGe,bToI (>=)), (BLe,bToI (<=))] :: [(BinOp, Integer->Integer->Integer)]
+      let opInt = fromMaybe undefined (lookup op ops)
+      return $ VInt $ opInt i1 i2
+   where
+         bToI op x y = if op x y then 1 else 0
+         iand x y = do
+           ix <- ensureInt =<< eval x
+           case ix of 
+             0 -> return $ VInt 0
+             _ -> do
+               iy <- ensureInt =<< eval y
+               case iy of {0 -> return $ VInt 0; _ -> return $ VInt 1;}
+         ior x y = do
+           ix <- ensureInt =<< eval x
+           case ix of 
+             0 -> do
+               iy <- ensureInt =<< eval y
+               case iy of {0 -> return $ VInt 0; _ -> return $ VInt 1;}
+             _ -> return $ VInt 1
+         idiv x y = do
+           ix <- ensureInt =<< eval x
+           iy <- ensureInt =<< eval y
+           when (iy == 0) (throwError "Divide by zero")
+           return $ VInt $ ix `div` iy
+
 eval (EAsgn lv e) = do
   pos <- getPos lv
   value <- eval e
@@ -100,8 +128,19 @@ eval (EIfElse cond e1 e2) = do
 eval (EWhile _ _) = throwError "TODO: while"
 eval (EFor _ _ _ _) = throwError "TODO: for"
 eval EBreak       = throwError "TODO: break"
-eval (ELet _ _)   = throwError "TODO: let"
+eval (ELet decs expr)   = throwError "TODO: let"
 
+addDec :: Monad m => Dec -> TigressT m PosMap
+addDec (DType _) = liftM posmap get
+addDec (DVar (VarDec (Id id) ty expr)) = do
+  pos <- freshVariable
+  val <- eval expr
+  updateVar pos val
+  pm <- liftM posmap $ get
+  let newpm = Map.insert id pos pm
+  modify $ \s -> s { posmap = newpm }
+  return newpm
+addDec (DFun (FunDec id params ty expr)) = throwError "TODO: function declaration"
 
 
 
