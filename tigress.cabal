@@ -28,3 +28,10 @@ Test-Suite test-parser
     build-depends:       base >=4 && <5, array >=0.4, mtl >=2.2, containers >=0.5, test-framework >=0.8, HUnit >= 1.2, test-framework-hunit >=0.3
     hs-source-dirs:      src/, test/
 
+Test-Suite test-eval
+    type:       exitcode-stdio-1.0
+    main-is:    EvalTest.hs
+    other-modules:       TigressLexer, TigressParser
+    build-depends:       base >=4 && <5, array >=0.4, mtl >=2.2, containers >=0.5, test-framework >=0.8, HUnit >= 1.2, test-framework-hunit >=0.3
+    hs-source-dirs:      src/, test/
+

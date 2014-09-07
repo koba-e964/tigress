@@ -7,6 +7,7 @@ import Control.Monad.State
 import Control.Monad.Except
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Maybe (fromMaybe)
 
 type Pos = Int -- the position of variable
 
@@ -36,7 +37,7 @@ getPos (LId (Id name)) = do
    m <- liftM posmap get
    case Map.lookup name m of
      Just p  -> return p
-     Nothing -> throwError $ "undefined vairable: " ++ name
+     Nothing -> throwError $ "undefined variable: " ++ name
 getPos (LMem _ _) = throwError "TODO: getpos-mem"
 getPos (LIdx lv e) = do
   iv <- ensureInt =<< eval e
@@ -68,7 +69,14 @@ eval (EMinus e) = do
   v <- eval e
   iv <- ensureInt v
   return $ VInt (- iv)
-eval (EBin _op _e1 _e2) = throwError "TODO: binary-operator"
+eval (EBin op e1 e2) = do
+  i1 <- ensureInt =<< eval e1
+  i2 <- ensureInt =<< eval e2
+  let ops = [(BAdd,(+)), (BSub,(-)), (BMul,(*)), (BDiv,div), (BEq,bToI (==)), (BNeq,bToI (/=)), (BGt,bToI (>)), (BLt,bToI (<)),
+       (BGe,bToI (>=)), (BLe,bToI (<=))] :: [(BinOp, Integer->Integer->Integer)]
+  let opInt = fromMaybe undefined (lookup op ops)
+  return $ VInt $ opInt i1 i2
+   where bToI op x y = if op x y then 1 else 0
 eval (EAsgn lv e) = do
   pos <- getPos lv
   value <- eval e
@@ -77,7 +85,7 @@ eval (EAsgn lv e) = do
 eval (EApp _ _) = throwError "TODO: application"
 eval (ESeq ls) = do
   results <- forM ls eval
-  return $ last results
+  return $ last (VNone : results)
 eval (ERec _ _) = throwError "TODO: record"
 eval (EArr _ _ _) = throwError "TODO: new-array"
 eval (EIf cond e1) = do

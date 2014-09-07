@@ -65,16 +65,16 @@ data TypeField = TypeField !Id !TypeId deriving (Eq, Show)
 newtype TypeId = TypeId String deriving (Eq, Show)
 
 data VarDec = 
-  VarDec !Id !(Maybe TypeId) !Expr deriving (Eq, Show) -- type-id can be Nothing.
+  VarDec !Id !(Maybe TypeId) !Expr deriving (Eq, Show) -- type-id can be Nothing. type Nothing is the type of VNone.
 
 data FunDec = FunDec !Id ![TypeField] !(Maybe TypeId) !Expr deriving (Eq, Show)
 
 -- value for tigress.
 
 data Value = 
-  VInt Integer
-  | VStr String
-  | VRec (Map String Value)
+  VInt !Integer
+  | VStr !String
+  | VRec !(Map String Value)
   | VNil
   | VNone -- This shows that no values are returned.
   deriving (Eq, Show)

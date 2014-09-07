@@ -151,6 +151,7 @@ simpl_expr:
 | lvalue { ELValue $1 }
 | id "(" ")" { EApp $1 [] }
 | id "(" expr_list ")" { EApp $1 $3 }
+| "(" ")" { ESeq [] }
 | "(" expr_seq ")" { ESeq $2 }
 | type_id "{" field_list "}" { ERec $1 $3 }
 | type_id "[" expr "]" OF expr { EArr $1 $3 $6 }
