@@ -75,8 +75,33 @@ operator precedence:
 -}
 
 expr:
-oexpr0  { $1 }
+  if_expr_not_dangling { $1 }
+| if_expr_dangling     { $1 }
 ;
+
+if_expr_not_dangling:
+  oexpr0  { $1 }
+| if_then_not_dangling ELSE if_expr_not_dangling { case $1 of (x,y) -> EIfElse x y $3 }
+| WHILE expr DO if_expr_not_dangling { EWhile $2 $4 }
+| FOR id ":=" expr TO expr DO if_expr_not_dangling { EFor $2 $4 $6 $8 }
+;
+
+if_expr_dangling:
+  if_then_dangling { $1 }
+| if_then_not_dangling { case $1 of (x,y) -> EIf x y }
+| if_then_not_dangling ELSE if_expr_dangling { case $1 of (x,y) -> EIfElse x y $3 }
+| WHILE expr DO if_expr_dangling { EWhile $2 $4 }
+| FOR id ":=" expr TO expr DO if_expr_dangling { EFor $2 $4 $6 $8 }
+;
+
+if_then_not_dangling:
+  IF expr THEN if_expr_not_dangling { ($2, $4) }
+;
+
+if_then_dangling:
+  IF expr THEN if_expr_dangling { EIf $2 $4 }
+;
+
 
 oexpr0: -- ":="
   oexpr1             { $1 }
@@ -129,10 +154,6 @@ simpl_expr:
 | "(" expr_seq ")" { ESeq $2 }
 | type_id "{" field_list "}" { ERec $1 $3 }
 | type_id "[" expr "]" OF expr { EArr $1 $3 $6 }
-| IF expr THEN expr { EIf $2 $4 }
-| IF expr THEN expr ELSE expr { EIfElse $2 $4 $6 }
-| WHILE expr DO expr { EWhile $2 $4 }
-| FOR id ":=" expr TO expr DO expr { EFor $2 $4 $6 $8 }
 | BREAK  { EBreak }
 | LET declaration_list IN END          { ELet $2 [] }
 | LET declaration_list IN expr_seq END { ELet $2 $4 }
@@ -141,17 +162,17 @@ simpl_expr:
 
 expr_seq:
   expr  { [$1] }
-| expr_seq ";" expr { $1 ++ [$3] }
+| expr ";" expr_seq { $1 : $3 }
 ;
 
 expr_list:
   expr  { [$1] }
-| expr_list "," expr { $1 ++ [$3] }
+| expr "," expr_list { $1 : $3 }
 ;
 
 field_list:
   id "=" expr { [Field $1 $3] }
-| field_list "," id "=" expr { $1 ++ [Field $3 $5] }
+| id "=" expr "," field_list { Field $1 $3 : $5 }
 ;
 
 lvalue:
@@ -162,7 +183,7 @@ lvalue:
 
 declaration_list:
   declaration { [$1] }
-| declaration_list declaration { $1 ++ [$2] }
+| declaration declaration_list { $1 : $2 }
 ;
 
 declaration:
