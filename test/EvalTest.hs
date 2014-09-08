@@ -1,5 +1,6 @@
 module Main where
 
+import Control.Monad.ST (runST)
 import Control.Monad.Identity (runIdentity)
 import qualified Test.Framework as TF
 import qualified Test.Framework.Providers.HUnit as TFH 
@@ -8,6 +9,7 @@ import TigressExpr
 import TigressLexer as TL
 import TigressParser as TP
 import TigressEval as TE
+
 
 main :: IO ()
 main = TF.defaultMain tests
@@ -21,7 +23,7 @@ exprOfString str =
     Left  _ -> error $ "no parse: " ++ str
 
 evalPure :: Expr -> Either String Value
-evalPure expr = runIdentity (TE.runTigress (TE.eval expr))
+evalPure expr = runST (TE.runTigress (TE.eval expr))
 
 testEq :: (Eq a, Show a) => String -> a -> a -> TF.Test
 testEq msg actual expected = TFH.testCase msg (TH.assertEqual msg expected actual)

@@ -3,70 +3,64 @@ module TigressEval where
 
 import TigressExpr
 import Control.Applicative
-import Control.Monad.State
 import Control.Monad.Except
+import Control.Monad.Primitive (PrimMonad, PrimState)
+import Control.Monad.State
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
+import Data.Primitive.MutVar (MutVar, newMutVar, readMutVar, writeMutVar)
 
 type Pos = Int -- the position of variable
-type PosMap = Map String Pos
+type VarMap m = Map String (VarRef m Value)
+type VarRef m = MutVar (PrimState m)
 
 
-data TigState = TigState {
-    posmap :: PosMap,
-    varmap :: Map Pos Value,
+data TigState m = TigState {
+    varmap :: VarMap m,
     count  :: Int
-} deriving Show
+}
 
-newtype TigressT m a = TigressT { invTigress :: ExceptT String (StateT TigState m) a } deriving (Functor, Applicative, Monad, MonadState TigState, MonadError String)
+newtype TigressT m a = TigressT { invTigress :: ExceptT String (StateT (TigState m) m) a } deriving (Functor, Applicative, Monad, MonadState (TigState m), MonadError String)
 
-emptyTigState :: TigState
-emptyTigState = TigState Map.empty Map.empty 0
+instance MonadTrans TigressT where
+  lift = TigressT . lift . lift
 
-runTigress :: Monad m => TigressT m a -> m (Either String a)
+emptyTigState :: TigState m
+emptyTigState = TigState Map.empty 0
+
+runTigress :: (PrimMonad m, Monad m) => TigressT m a -> m (Either String a)
 runTigress m = evalStateT (runExceptT (invTigress m)) emptyTigState
 
-freshVariable :: Monad m => TigressT m Pos
-freshVariable = do
-  i <- liftM count $ get
-  modify $ \s -> s { count = i + 1 }
-  return i
+newVariable :: (PrimMonad m, Monad m) => TigressT m (VarRef m Value)
+newVariable = lift $ newMutVar VNone
 
 
-getPos :: Monad m => LValue -> TigressT m Pos
-getPos (LId (Id name)) = do
-   m <- liftM posmap get
+getVar :: (PrimMonad m, Monad m) => LValue -> TigressT m (VarRef m Value)
+getVar (LId (Id name)) = do
+   m <- liftM varmap get
    case Map.lookup name m of
      Just p  -> return p
      Nothing -> throwError $ "undefined variable: " ++ name
-getPos (LMem _ _) = throwError "TODO: getpos-mem"
-getPos (LIdx lv e) = do
-  iv <- ensureInt =<< eval e
-  pos <- getPos lv
-  return $ pos + fromIntegral iv
+getVar (LMem _ _) = throwError "TODO: getVar-mem"
+getVar (LIdx lv e) = throwError "TODO: getVar-index"
 
+readVar :: (PrimMonad m, Monad m) => VarRef m Value -> TigressT m Value
+readVar var = lift $ readMutVar var
+updateVar :: (PrimMonad m, Monad m) => VarRef m Value -> Value -> TigressT m ()
+updateVar var value = lift $ writeMutVar var value
 
-updateVar :: Monad m => Pos -> Value -> TigressT m ()
-updateVar pos value = do
-  vm <- liftM varmap get
-  when (Map.notMember pos vm) $ throwError $ "attempt to write on invalid position: " ++ show pos  
-  modify $ \s -> s {varmap = Map.insert pos value vm}
-
-ensureInt :: Monad m => Value -> TigressT m Integer
+ensureInt :: (PrimMonad m, Monad m) => Value -> TigressT m Integer
 ensureInt (VInt v) = return v
 ensureInt value    = throwError $ "not an integer: " ++ show value
 
-eval :: Monad m => Expr -> TigressT m Value
+eval :: (PrimMonad m, Monad m) => Expr -> TigressT m Value
 eval (EStr str) = return $ VStr str
 eval (EInt i)   = return $ VInt i
 eval ENil       = return VNil
 eval (ELValue lv) = do
-    pos <- getPos lv
-    vm <- liftM varmap get
-    case Map.lookup pos vm of
-      Just p  -> return p
-      Nothing -> throwError $ "invalid position: " ++ show pos
+    var <- getVar lv
+    readVar var
 eval (EMinus e) = do
   v <- eval e
   iv <- ensureInt v
@@ -106,10 +100,10 @@ eval (EBin op e1 e2) = do
            return $ VInt $ ix `div` iy
 
 eval (EAsgn lv e) = do
-  pos <- getPos lv
+  var <- getVar lv
   value <- eval e
-  updateVar pos value
-  return value
+  updateVar var value
+  return VNone
 eval (EApp _ _) = throwError "TODO: application"
 eval (ESeq ls) = do
   results <- forM ls eval
@@ -130,16 +124,16 @@ eval (EFor _ _ _ _) = throwError "TODO: for"
 eval EBreak       = throwError "TODO: break"
 eval (ELet decs expr)   = throwError "TODO: let"
 
-addDec :: Monad m => Dec -> TigressT m PosMap
-addDec (DType _) = liftM posmap get
+addDec :: (PrimMonad m, Monad m) => Dec -> TigressT m (VarMap m)
+addDec (DType _) = liftM varmap get
 addDec (DVar (VarDec (Id id) ty expr)) = do
-  pos <- freshVariable
+  var <- newVariable
   val <- eval expr
-  updateVar pos val
-  pm <- liftM posmap $ get
-  let newpm = Map.insert id pos pm
-  modify $ \s -> s { posmap = newpm }
-  return newpm
+  updateVar var val
+  vm <- liftM varmap $ get
+  let newvm = Map.insert id var vm
+  modify $ \s -> s { varmap = newvm }
+  return newvm
 addDec (DFun (FunDec id params ty expr)) = throwError "TODO: function declaration"
 
 
