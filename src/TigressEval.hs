@@ -4,21 +4,19 @@ module TigressEval where
 import TigressExpr
 import Control.Applicative
 import Control.Monad.Except
+import Control.Monad.State (MonadState, StateT, evalStateT, get, modify, put)
 import Control.Monad.Primitive (PrimMonad, PrimState)
-import Control.Monad.State
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
-import Data.Primitive.MutVar (MutVar, newMutVar, readMutVar, writeMutVar)
+import Data.Primitive.MutVar (MutVar, modifyMutVar, newMutVar, readMutVar, writeMutVar)
 
 type Pos = Int -- the position of variable
-type VarMap m = Map String (VarRef m Value)
-type VarRef m = MutVar (PrimState m)
 
 
 data TigState m = TigState {
     varmap :: VarMap m,
-    count  :: Int
+    funcmap :: Map String (Function m)
 }
 
 newtype TigressT m a = TigressT { invTigress :: ExceptT String (StateT (TigState m) m) a } deriving (Functor, Applicative, Monad, MonadState (TigState m), MonadError String)
@@ -26,8 +24,24 @@ newtype TigressT m a = TigressT { invTigress :: ExceptT String (StateT (TigState
 instance MonadTrans TigressT where
   lift = TigressT . lift . lift
 
+-- value for tigress.
+
+data Value = 
+  VInt !Integer
+  | VStr !String
+  | VRec !(Map String Value)
+  | VNil
+  | VNone -- This shows that no values are returned.
+  deriving (Eq, Show)
+type VarRef m = MutVar (PrimState m)
+
+type VarMap m = Map String (VarRef m Value)
+
+data Function m = 
+  Function ![String] !(VarRef m (TigState m)) !Expr
+
 emptyTigState :: TigState m
-emptyTigState = TigState Map.empty 0
+emptyTigState = TigState Map.empty Map.empty
 
 runTigress :: (PrimMonad m, Monad m) => TigressT m a -> m (Either String a)
 runTigress m = evalStateT (runExceptT (invTigress m)) emptyTigState
@@ -35,6 +49,15 @@ runTigress m = evalStateT (runExceptT (invTigress m)) emptyTigState
 newVariable :: (PrimMonad m, Monad m) => TigressT m (VarRef m Value)
 newVariable = lift $ newMutVar VNone
 
+
+-- | Saves current environment, performs action m and restore environment after action.
+-- | Variables in original environment are modified if they are modified in m.
+sandbox :: (PrimMonad m, Monad m) => TigressT m a -> TigressT m a
+sandbox m = do
+  s <- get
+  result <- m
+  put s
+  return result
 
 getVar :: (PrimMonad m, Monad m) => LValue -> TigressT m (VarRef m Value)
 getVar (LId (Id name)) = do
@@ -45,7 +68,7 @@ getVar (LId (Id name)) = do
 getVar (LMem _ _) = throwError "TODO: getVar-mem"
 getVar (LIdx lv e) = throwError "TODO: getVar-index"
 
-readVar :: (PrimMonad m, Monad m) => VarRef m Value -> TigressT m Value
+readVar :: (PrimMonad m, Monad m) => VarRef m a -> TigressT m a
 readVar var = lift $ readMutVar var
 updateVar :: (PrimMonad m, Monad m) => VarRef m Value -> Value -> TigressT m ()
 updateVar var value = lift $ writeMutVar var value
@@ -104,7 +127,23 @@ eval (EAsgn lv e) = do
   value <- eval e
   updateVar var value
   return VNone
-eval (EApp _ _) = throwError "TODO: application"
+eval (EApp (Id name) args) = do
+  fm <- liftM funcmap get
+  case Map.lookup name fm of
+    Nothing -> throwError $ "undefined function: " ++ name
+    Just (Function params tigState expr) -> do
+      when (length params /= length args) (throwError $ "wrong number of arguments: " ++ show (length args) ++ " (expected: " ++ show (length params) ++ ")")
+      env <- readVar tigState
+      newenv <- foldM (\env (name, ex) -> do
+        val <- eval ex
+        newVar <- lift $ newMutVar val
+        return $ env { varmap = Map.insert name newVar (varmap env) }
+       ) env (zip params args)
+      oldenv <- get
+      put newenv
+      result <- eval expr
+      put oldenv
+      return result
 eval (ESeq ls) = do
   results <- forM ls eval
   return $ last (VNone : results)
@@ -122,19 +161,39 @@ eval (EIfElse cond e1 e2) = do
 eval (EWhile _ _) = throwError "TODO: while"
 eval (EFor _ _ _ _) = throwError "TODO: for"
 eval EBreak       = throwError "TODO: break"
-eval (ELet decs expr)   = throwError "TODO: let"
+eval (ELet decs exprs) = sandbox $ do
+  addDecs decs
+  results <- mapM eval exprs
+  return $ last (VNone : results)
 
-addDec :: (PrimMonad m, Monad m) => Dec -> TigressT m (VarMap m)
-addDec (DType _) = liftM varmap get
-addDec (DVar (VarDec (Id id) ty expr)) = do
+-- | Processes declarations and modifies the variable environment.
+-- | The original variable environment and function environment are modified.
+addDecs :: (PrimMonad m, Monad m) => [Dec] -> TigressT m ()
+addDecs decs = do
+    newTigState <- lift . newMutVar =<< get
+    forM_ decs (addDec newTigState) -- passes mutable environment in order to allow mutual recursions
+    fm <- liftM funcmap $ lift (readMutVar newTigState)
+    modify $ \s -> s { funcmap = fm }
+    return ()
+
+-- | Processes one declaration and modifies the variable environment.
+-- | The original variable environment is modified, but function environment is NOT modified. 
+addDec :: (PrimMonad m, Monad m) => VarRef m (TigState m) -> Dec -> TigressT m ()
+addDec _newTigState (DType _) = return ()
+addDec _newTigState (DVar (VarDec (Id id) ty expr)) = do
   var <- newVariable
   val <- eval expr
   updateVar var val
-  vm <- liftM varmap $ get
+  vm <- liftM varmap get
   let newvm = Map.insert id var vm
   modify $ \s -> s { varmap = newvm }
-  return newvm
-addDec (DFun (FunDec id params ty expr)) = throwError "TODO: function declaration"
+  return ()
+addDec newTigState (DFun (FunDec (Id name) params ty expr)) = do
+    let fct = Function (map ( \(TypeField (Id x) _) -> x) params) newTigState expr
+    fm <- liftM funcmap $ lift (readMutVar newTigState)
+    let newfm = Map.insert name fct fm
+    lift $ modifyMutVar newTigState $ \s -> s { funcmap = newfm } -- modifies newTigState, does not modify env in state
+    return ()
 
 
 

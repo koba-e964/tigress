@@ -69,13 +69,3 @@ data VarDec =
 
 data FunDec = FunDec !Id ![TypeField] !(Maybe TypeId) !Expr deriving (Eq, Show)
 
--- value for tigress.
-
-data Value = 
-  VInt !Integer
-  | VStr !String
-  | VRec !(Map String Value)
-  | VNil
-  | VNone -- This shows that no values are returned.
-  deriving (Eq, Show)
-

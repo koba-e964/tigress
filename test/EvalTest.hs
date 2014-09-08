@@ -79,4 +79,6 @@ testsLet :: TF.Test
 testsLet = TF.testGroup "eval_let" [
   evalCheck "eval_let1" "let var a := 1 in a + 2 end" (VInt 3)
   ,evalCheck "eval_let2" "let var a := 1 function b (i:int) : int = i + i in b(a) + 2 end" (VInt 4)
+  ,evalCheck "eval_let3" "let function fib(i:int):int = if i <= 1 then i else fib(i-1) + fib(i-2) in fib(10) end" (VInt 55) -- recursion
+  ,evalCheck "eval_let4" "let function odd(i:int) : int = if i = 0 then 0 else even(i-1) function even (i:int) : int = if i = 0 then 1 else odd(i-1) in odd(99) end" (VInt 1) -- mutual recursion
  ]
