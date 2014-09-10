@@ -30,7 +30,7 @@ tokens :-
   "nil"   { \_->NIL }
   "of"    { \_->OF }
   "then"  { \_->THEN }
-  "to"    { \_->THEN }
+  "to"    { \_->TO }
   "type"  { \_->TYPE }
   "var"   { \_->VAR }
   "while" { \_->WHILE }

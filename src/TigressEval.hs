@@ -159,7 +159,18 @@ eval (EIfElse cond e1 e2) = do
     0 -> eval e2 -- 0 is regarded to be false.
     _ -> eval e1 -- otherwise, an integer is regarded to be true.
 eval (EWhile _ _) = throwError "TODO: while"
-eval (EFor _ _ _ _) = throwError "TODO: for"
+eval (EFor (Id name) from to expr) = do
+  fromVal <- ensureInt =<< eval from
+  toVal   <- ensureInt =<< eval to
+  var     <- newVariable
+  env <- get
+  let newenv = env { varmap = Map.insert name var (varmap env) }
+  forM_ [fromVal .. toVal] $ \i -> do
+    updateVar var (VInt i)
+    put newenv
+    eval expr
+  put env -- restore
+  return VNone
 eval EBreak       = throwError "TODO: break"
 eval (ELet decs exprs) = sandbox $ do
   addDecs decs
