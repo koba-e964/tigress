@@ -2,6 +2,7 @@ module Main where
 
 import Control.Monad.ST (runST)
 import Control.Monad.Identity (runIdentity)
+import System.Timeout (timeout)
 import qualified Test.Framework as TF
 import qualified Test.Framework.Providers.HUnit as TFH 
 import qualified Test.HUnit as TH
@@ -25,8 +26,13 @@ exprOfString str =
 evalPure :: Expr -> Either String Value
 evalPure expr = runST (TE.runTigress (TE.eval expr))
 
+-- | Tests two values are equal. Checking will be terminated after 2000 milliseconds.
 testEq :: (Eq a, Show a) => String -> a -> a -> TF.Test
-testEq msg actual expected = TFH.testCase msg (TH.assertEqual msg expected actual)
+testEq msg actual expected = TFH.testCase msg $ do
+  result <- timeout 2000000 $ TH.assertEqual msg expected actual
+  case result of
+    Nothing -> fail "time limit exceeded (2000ms)"
+    _       -> return ()
 
 evalCheck :: String -> String -> Value -> TF.Test
 evalCheck name str expected = 
@@ -82,5 +88,10 @@ testsLet = TF.testGroup "eval_let" [
   ,evalCheck "eval_let3" "let function fib(i:int):int = if i <= 1 then i else fib(i-1) + fib(i-2) in fib(10) end" (VInt 55) -- recursion
   ,evalCheck "eval_let4" "let function odd(i:int) : int = if i = 0 then 0 else even(i-1) function even (i:int) : int = if i = 0 then 1 else odd(i-1) in odd(99) end" (VInt 1) -- mutual recursion
   ,evalCheck "eval_for1" "for i := 0 to 10 do 2" VNone -- "for" returns no value
-  ,evalCheck "eval_for2" "let var sum := 0 in (for i := 0 to 10 do sum := sum + i); sum end" (VInt 55)  
+  ,evalCheck "eval_for2" "let var sum := 0 in for i := 0 to 10 do sum := sum + i; sum end" (VInt 55)
+  ,evalCheck "eval_while1" "let var sum := 0 var i := 0 in while i <= 10 do (sum := sum + i; i := i + 1); sum end" (VInt 55)
+  ,evalCheck "eval_while2" "let var i := 1 in while i <= 100 do i := i + i; i end" (VInt 128)  
+  ,evalCheck "eval_break1" "let var sum := 0 in for i := 0 to 10 do (sum := sum + i; if i >= 4 then break); sum end" (VInt 10)
+  ,evalCheck "eval_break2" "let var i := 1 in while 1 do (i := i + i; if i >= 100 then break); i end" (VInt 128)  
  ]
+

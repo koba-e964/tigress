@@ -10,6 +10,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Primitive.MutVar (MutVar, modifyMutVar, newMutVar, readMutVar, writeMutVar)
+import Debug.Trace (trace)
 
 type Pos = Int -- the position of variable
 
@@ -45,6 +46,9 @@ emptyTigState = TigState Map.empty Map.empty
 
 runTigress :: (PrimMonad m, Monad m) => TigressT m a -> m (Either String a)
 runTigress m = evalStateT (runExceptT (invTigress m)) emptyTigState
+
+emitWarning :: (PrimMonad m, Monad m) => String -> TigressT m ()
+emitWarning msg = trace msg (return ())
 
 newVariable :: (PrimMonad m, Monad m) => TigressT m (VarRef m Value)
 newVariable = lift $ newMutVar VNone
@@ -151,14 +155,26 @@ eval (ERec _ _) = throwError "TODO: record"
 eval (EArr _ _ _) = throwError "TODO: new-array"
 eval (EIf cond e1) = do
   b <- ensureInt =<< eval cond
-  when (b /= 0) (eval e1 >> return ()) -- a nonzero value is regarded to be true.
+  when (b /= 0) $ do -- a nonzero value is regarded to be true.
+     result <- eval e1
+     when (result /= VNone) $ emitWarning $ "in if-then, then clause should not return a value, but returned " ++ show result
+     return ()
   return VNone -- always returns no value.
 eval (EIfElse cond e1 e2) = do
   b <- ensureInt =<< eval cond
   case b of
     0 -> eval e2 -- 0 is regarded to be false.
     _ -> eval e1 -- otherwise, an integer is regarded to be true.
-eval (EWhile _ _) = throwError "TODO: while"
+eval (EWhile cond expr) = go
+  where
+  go = do
+    condI <- ensureInt =<< eval cond
+    case condI of
+      0 -> return VNone
+      _ -> do
+        result <- eval expr
+        when (result /= VNone) $ emitWarning $ "expr in while must not return a value, but returned: " ++ show result
+        go
 eval (EFor (Id name) from to expr) = do
   fromVal <- ensureInt =<< eval from
   toVal   <- ensureInt =<< eval to
