@@ -3,6 +3,7 @@ module TigressEval where
 
 import TigressExpr
 import Control.Applicative
+import Control.Monad.Cont (ContT, MonadCont, callCC, runContT)
 import Control.Monad.Except
 import Control.Monad.State (MonadState, StateT, evalStateT, get, modify, put)
 import Control.Monad.Primitive (PrimMonad, PrimState)
@@ -14,16 +15,18 @@ import Debug.Trace (trace)
 
 type Pos = Int -- the position of variable
 
+data TigBreak = TBFlat | TBInWhile | TBBreaking
 
-data TigState m = TigState {
-    varmap :: VarMap m,
-    funcmap :: Map String (Function m)
+data TigState r m = TigState {
+    varmap :: VarMap m
+    ,funcmap :: Map String (Function r m)
+    ,tigCont :: Maybe (Value -> TigressT r m Value)
 }
 
-newtype TigressT m a = TigressT { invTigress :: ExceptT String (StateT (TigState m) m) a } deriving (Functor, Applicative, Monad, MonadState (TigState m), MonadError String)
+newtype TigressT r m a = TigressT { invTigress :: ExceptT String (ContT r (StateT (TigState r m) m)) a } deriving (Functor, Applicative, Monad, MonadState (TigState r m), MonadError String, MonadCont)
 
-instance MonadTrans TigressT where
-  lift = TigressT . lift . lift
+instance MonadTrans (TigressT r) where
+  lift = TigressT . lift . lift . lift
 
 -- value for tigress.
 
@@ -38,32 +41,32 @@ type VarRef m = MutVar (PrimState m)
 
 type VarMap m = Map String (VarRef m Value)
 
-data Function m = 
-  Function ![String] !(VarRef m (TigState m)) !Expr
+data Function r m = 
+  Function ![String] !(VarRef m (TigState r m)) !Expr
 
-emptyTigState :: TigState m
-emptyTigState = TigState Map.empty Map.empty
+emptyTigState :: TigState r m
+emptyTigState = TigState {varmap = Map.empty, funcmap = Map.empty, tigCont = Nothing}
 
-runTigress :: (PrimMonad m, Monad m) => TigressT m a -> m (Either String a)
-runTigress m = evalStateT (runExceptT (invTigress m)) emptyTigState
+runTigress :: (PrimMonad m, Monad m) => TigressT (Either String a) m a -> m (Either String a)
+runTigress m = evalStateT (runContT (runExceptT $ invTigress m) return) emptyTigState
 
-emitWarning :: (PrimMonad m, Monad m) => String -> TigressT m ()
+emitWarning :: (PrimMonad m, Monad m) => String -> TigressT r m ()
 emitWarning msg = trace msg (return ())
 
-newVariable :: (PrimMonad m, Monad m) => TigressT m (VarRef m Value)
+newVariable :: (PrimMonad m, Monad m) => TigressT r m (VarRef m Value)
 newVariable = lift $ newMutVar VNone
 
 
 -- | Saves current environment, performs action m and restore environment after action.
 -- | Variables in original environment are modified if they are modified in m.
-sandbox :: (PrimMonad m, Monad m) => TigressT m a -> TigressT m a
+sandbox :: (PrimMonad m, Monad m) => TigressT r m a -> TigressT r m a
 sandbox m = do
   s <- get
   result <- m
   put s
   return result
 
-getVar :: (PrimMonad m, Monad m) => LValue -> TigressT m (VarRef m Value)
+getVar :: (PrimMonad m, Monad m) => LValue -> TigressT r m (VarRef m Value)
 getVar (LId (Id name)) = do
    m <- liftM varmap get
    case Map.lookup name m of
@@ -72,16 +75,16 @@ getVar (LId (Id name)) = do
 getVar (LMem _ _) = throwError "TODO: getVar-mem"
 getVar (LIdx lv e) = throwError "TODO: getVar-index"
 
-readVar :: (PrimMonad m, Monad m) => VarRef m a -> TigressT m a
+readVar :: (PrimMonad m, Monad m) => VarRef m a -> TigressT r m a
 readVar var = lift $ readMutVar var
-updateVar :: (PrimMonad m, Monad m) => VarRef m Value -> Value -> TigressT m ()
+updateVar :: (PrimMonad m, Monad m) => VarRef m Value -> Value -> TigressT r m ()
 updateVar var value = lift $ writeMutVar var value
 
-ensureInt :: (PrimMonad m, Monad m) => Value -> TigressT m Integer
+ensureInt :: (PrimMonad m, Monad m) => Value -> TigressT r m Integer
 ensureInt (VInt v) = return v
 ensureInt value    = throwError $ "not an integer: " ++ show value
 
-eval :: (PrimMonad m, Monad m) => Expr -> TigressT m Value
+eval :: (PrimMonad m, Monad m) => Expr -> TigressT r m Value
 eval (EStr str) = return $ VStr str
 eval (EInt i)   = return $ VInt i
 eval ENil       = return VNil
@@ -165,8 +168,7 @@ eval (EIfElse cond e1 e2) = do
   case b of
     0 -> eval e2 -- 0 is regarded to be false.
     _ -> eval e1 -- otherwise, an integer is regarded to be true.
-eval (EWhile cond expr) = go
-  where
+eval (EWhile cond expr) = loopContext go where
   go = do
     condI <- ensureInt =<< eval cond
     case condI of
@@ -175,27 +177,37 @@ eval (EWhile cond expr) = go
         result <- eval expr
         when (result /= VNone) $ emitWarning $ "expr in while must not return a value, but returned: " ++ show result
         go
-eval (EFor (Id name) from to expr) = do
-  fromVal <- ensureInt =<< eval from
-  toVal   <- ensureInt =<< eval to
-  var     <- newVariable
-  env <- get
-  let newenv = env { varmap = Map.insert name var (varmap env) }
-  forM_ [fromVal .. toVal] $ \i -> do
-    updateVar var (VInt i)
-    put newenv
-    eval expr
-  put env -- restore
-  return VNone
-eval EBreak       = throwError "TODO: break"
+eval (EFor (Id name) from to expr) = loopContext go where
+  go = do
+    fromVal <- ensureInt =<< eval from
+    toVal   <- ensureInt =<< eval to
+    var     <- newVariable
+    env <- get
+    let newenv = env { varmap = Map.insert name var (varmap env) }
+    forM_ [fromVal .. toVal] $ \i -> do
+      updateVar var (VInt i)
+      put newenv
+      eval expr
+    put env -- restore
+    return VNone
+eval EBreak       = do
+  maybeCont <- liftM tigCont get
+  case maybeCont of
+    Just cont -> cont VNone
+    Nothing   -> throwError "Not in breakable context"
 eval (ELet decs exprs) = sandbox $ do
   addDecs decs
   results <- mapM eval exprs
   return $ last (VNone : results)
 
+loopContext :: (PrimMonad m, Monad m) => TigressT r m Value -> TigressT r m Value
+loopContext go = sandbox $ callCC $ \cont -> do
+  modify $ \s -> s { tigCont = Just cont }
+  go
+
 -- | Processes declarations and modifies the variable environment.
 -- | The original variable environment and function environment are modified.
-addDecs :: (PrimMonad m, Monad m) => [Dec] -> TigressT m ()
+addDecs :: (PrimMonad m, Monad m) => [Dec] -> TigressT r m ()
 addDecs decs = do
     newTigState <- lift . newMutVar =<< get
     forM_ decs (addDec newTigState) -- passes mutable environment in order to allow mutual recursions
@@ -205,7 +217,7 @@ addDecs decs = do
 
 -- | Processes one declaration and modifies the variable environment.
 -- | The original variable environment is modified, but function environment is NOT modified. 
-addDec :: (PrimMonad m, Monad m) => VarRef m (TigState m) -> Dec -> TigressT m ()
+addDec :: (PrimMonad m, Monad m) => VarRef m (TigState r m) -> Dec -> TigressT r m ()
 addDec _newTigState (DType _) = return ()
 addDec _newTigState (DVar (VarDec (Id id) ty expr)) = do
   var <- newVariable
