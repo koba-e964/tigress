@@ -92,7 +92,7 @@ testsLet = TF.testGroup "eval_let" [
   ,evalCheck "eval_while1" "let var sum := 0 var i := 0 in while i <= 10 do (sum := sum + i; i := i + 1); sum end" (VInt 55)
   ,evalCheck "eval_while2" "let var i := 1 in while i <= 100 do i := i + i; i end" (VInt 128)  
   ,evalCheck "eval_break1" "let var sum := 0 in for i := 0 to 10 do (sum := sum + i; if i >= 4 then break); sum end" (VInt 10)
-  ,evalCheck "eval_break2" "let var i := 1 in while 1 do (i := i + i; if i >= 100 then break); i end" (VInt 128)  
-  ,checkErrorExpr "eval_break3" "(for i := 0 to 10 do (i;());break)"  
+  ,evalCheck "eval_break2" "let var i := 1 in while 1 do (i := i + i; if i >= 100 then break); i end" (VInt 128)
+  ,checkErrorExpr "eval_break3" "(for i := 0 to 10 do (i;());break)"
  ]
 

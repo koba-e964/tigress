@@ -6,6 +6,7 @@ import TigressToken
 import TigressLexer as TL
 import TigressParser as TP
 import TigressEval as TE
+import Control.Monad (void)
 import System.IO
 
 str :: String
@@ -29,12 +30,12 @@ repl = do
     let toks = TL.alexScanTokens line
     let exprOrErr = TP.tparse toks
     case exprOrErr of
-       Left err -> print err >> return ()
+       Left err -> void $ print err
        Right expr -> do
         print expr
         res <- runTigress $ TE.eval expr
         case res of
-            Left err  -> print err >> return ()
+            Left err  -> void $ print err
             Right val -> do
                 putStrLn $ "- : ???\n" ++ show val
                 repl

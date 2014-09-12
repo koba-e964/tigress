@@ -2,20 +2,21 @@
 module TigressEval where
 
 import TigressExpr
-import Control.Applicative
+import Control.Applicative (Applicative)
+import Control.Monad (foldM, forM, forM_, liftM, when)
 import Control.Monad.Cont (ContT, MonadCont, callCC, runContT)
-import Control.Monad.Except
+import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
 import Control.Monad.State (MonadState, StateT, evalStateT, get, modify, put)
+import Control.Monad.Trans (MonadTrans, lift)
 import Control.Monad.Primitive (PrimMonad, PrimState)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromJust)
 import Data.Primitive.MutVar (MutVar, modifyMutVar, newMutVar, readMutVar, writeMutVar)
 import Debug.Trace (trace)
 
 type Pos = Int -- the position of variable
 
-data TigBreak = TBFlat | TBInWhile | TBBreaking
 
 data TigState r m = TigState {
     varmap :: VarMap m
@@ -95,7 +96,7 @@ eval (EMinus e) = do
   v <- eval e
   iv <- ensureInt v
   return $ VInt (- iv)
-eval (EBin op e1 e2) = do
+eval (EBin op e1 e2) =
   case op of
     BAnd -> iand e1 e2
     BOr  -> ior e1 e2
@@ -105,7 +106,7 @@ eval (EBin op e1 e2) = do
       i2 <- ensureInt =<< eval e2
       let ops = [(BAdd,(+)), (BSub,(-)), (BMul,(*)), (BEq,bToI (==)), (BNeq,bToI (/=)), (BGt,bToI (>)), (BLt,bToI (<)),
            (BGe,bToI (>=)), (BLe,bToI (<=))] :: [(BinOp, Integer->Integer->Integer)]
-      let opInt = fromMaybe undefined (lookup op ops)
+      let opInt = fromJust (lookup op ops)
       return $ VInt $ opInt i1 i2
    where
          bToI op x y = if op x y then 1 else 0
@@ -154,8 +155,8 @@ eval (EApp (Id name) args) = do
 eval (ESeq ls) = do
   results <- forM ls eval
   return $ last (VNone : results)
-eval (ERec _ _) = throwError "TODO: record"
-eval (EArr _ _ _) = throwError "TODO: new-array"
+eval (ERec {}) = throwError "TODO: record"
+eval (EArr {}) = throwError "TODO: new-array"
 eval (EIf cond e1) = do
   b <- ensureInt =<< eval cond
   when (b /= 0) $ do -- a nonzero value is regarded to be true.
@@ -182,13 +183,11 @@ eval (EFor (Id name) from to expr) = loopContext go where
     fromVal <- ensureInt =<< eval from
     toVal   <- ensureInt =<< eval to
     var     <- newVariable
-    env <- get
-    let newenv = env { varmap = Map.insert name var (varmap env) }
+    modify $ \env -> env { varmap = Map.insert name var (varmap env) }
     forM_ [fromVal .. toVal] $ \i -> do
       updateVar var (VInt i)
-      put newenv
-      eval expr
-    put env -- restore
+      result <- eval expr
+      when (result /= VNone) $ emitWarning $ "expr in for must not return a value, but returned: " ++ show result
     return VNone
 eval EBreak       = do
   maybeCont <- liftM tigCont get

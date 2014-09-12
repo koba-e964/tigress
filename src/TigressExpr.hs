@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 module TigressExpr where
 
 import Data.Map (Map)
