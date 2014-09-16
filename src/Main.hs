@@ -32,11 +32,11 @@ repl = do
     case exprOrErr of
        Left err -> void $ print err
        Right expr -> do
-        print expr
-        res <- runTigress $ TE.eval expr
-        case res of
+         print expr
+         res <- TE.runTigressExpr expr
+         case res of
             Left err  -> void $ print err
-            Right val -> do
+            Right val ->
                 putStrLn $ "- : ???\n" ++ show val
-                repl
+         repl
 

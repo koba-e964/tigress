@@ -9,6 +9,7 @@ import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
 import Control.Monad.State (MonadState, StateT, evalStateT, get, modify, put)
 import Control.Monad.Trans (MonadTrans, lift)
 import Control.Monad.Primitive (PrimMonad, PrimState)
+import Data.Array -- (Array)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
@@ -21,7 +22,7 @@ type Pos = Int -- the position of variable
 data TigState r m = TigState {
     varmap :: VarMap m
     ,funcmap :: Map String (Function r m)
-    ,tigCont :: Maybe (Value -> TigressT r m Value)
+    ,tigCont :: Maybe (Value m -> TigressT r m (Value m))
 }
 
 newtype TigressT r m a = TigressT { invTigress :: ExceptT String (ContT r (StateT (TigState r m) m)) a } deriving (Functor, Applicative, Monad, MonadState (TigState r m), MonadError String, MonadCont)
@@ -31,16 +32,26 @@ instance MonadTrans (TigressT r) where
 
 -- value for tigress.
 
-data Value = 
+data Value m = 
   VInt !Integer
   | VStr !String
-  | VRec !(Map String Value)
+  | VRec !(Map String (Value m))
+  | VArr !(Array Int (VarRef m (Value m)))
   | VNil
   | VNone -- This shows that no values are returned.
+  deriving Eq
+data FreezedValue =
+  FVInt !Integer
+  | FVStr !String
+  | FVRec !(Map String FreezedValue)
+  | FVArr !(Array Int FreezedValue)
+  | FVNil
+  | FVNone -- This shows that no values are returned.
   deriving (Eq, Show)
+
 type VarRef m = MutVar (PrimState m)
 
-type VarMap m = Map String (VarRef m Value)
+type VarMap m = Map String (VarRef m (Value m))
 
 data Function r m = 
   Function ![String] !(VarRef m (TigState r m)) !Expr
@@ -51,10 +62,21 @@ emptyTigState = TigState {varmap = Map.empty, funcmap = Map.empty, tigCont = Not
 runTigress :: (PrimMonad m, Monad m) => TigressT (Either String a) m a -> m (Either String a)
 runTigress m = evalStateT (runContT (runExceptT $ invTigress m) return) emptyTigState
 
+runTigressExpr :: (PrimMonad m, Monad m) => Expr -> m (Either String FreezedValue)
+runTigressExpr expr = runTigress $ do
+  result <- eval expr
+  freezeValue result
+
+freezeValue :: (PrimMonad m, Monad m) => Value m -> TigressT r m FreezedValue
+freezeValue (VStr str) = return (FVStr str)
+freezeValue (VInt i)   = return (FVInt i)
+freezeValue VNone      = return FVNone
+
+
 emitWarning :: (PrimMonad m, Monad m) => String -> TigressT r m ()
 emitWarning msg = trace msg (return ())
 
-newVariable :: (PrimMonad m, Monad m) => TigressT r m (VarRef m Value)
+newVariable :: (PrimMonad m, Monad m) => TigressT r m (VarRef m (Value m))
 newVariable = lift $ newMutVar VNone
 
 
@@ -67,7 +89,7 @@ sandbox m = do
   put s
   return result
 
-getVar :: (PrimMonad m, Monad m) => LValue -> TigressT r m (VarRef m Value)
+getVar :: (PrimMonad m, Monad m) => LValue -> TigressT r m (VarRef m (Value m))
 getVar (LId (Id name)) = do
    m <- liftM varmap get
    case Map.lookup name m of
@@ -78,14 +100,14 @@ getVar (LIdx lv e) = throwError "TODO: getVar-index"
 
 readVar :: (PrimMonad m, Monad m) => VarRef m a -> TigressT r m a
 readVar var = lift $ readMutVar var
-updateVar :: (PrimMonad m, Monad m) => VarRef m Value -> Value -> TigressT r m ()
+updateVar :: (PrimMonad m, Monad m) => VarRef m (Value m) -> Value m -> TigressT r m ()
 updateVar var value = lift $ writeMutVar var value
 
-ensureInt :: (PrimMonad m, Monad m) => Value -> TigressT r m Integer
+ensureInt :: (PrimMonad m, Monad m) => Value m -> TigressT r m Integer
 ensureInt (VInt v) = return v
-ensureInt value    = throwError $ "not an integer: " ++ show value
+ensureInt value    = throwError =<< liftM ("not an integer: " ++) (showValue value)
 
-eval :: (PrimMonad m, Monad m) => Expr -> TigressT r m Value
+eval :: (PrimMonad m, Monad m) => Expr -> TigressT r m (Value m)
 eval (EStr str) = return $ VStr str
 eval (EInt i)   = return $ VInt i
 eval ENil       = return VNil
@@ -161,7 +183,7 @@ eval (EIf cond e1) = do
   b <- ensureInt =<< eval cond
   when (b /= 0) $ do -- a nonzero value is regarded to be true.
      result <- eval e1
-     when (result /= VNone) $ emitWarning $ "in if-then, then clause should not return a value, but returned " ++ show result
+     when (result /= VNone) $ emitWarning . (++) "in if-then, then clause should not return a value, but returned " =<< showValue result
      return ()
   return VNone -- always returns no value.
 eval (EIfElse cond e1 e2) = do
@@ -176,7 +198,7 @@ eval (EWhile cond expr) = loopContext go where
       0 -> return VNone
       _ -> do
         result <- eval expr
-        when (result /= VNone) $ emitWarning $ "expr in while must not return a value, but returned: " ++ show result
+        when (result /= VNone) $ (emitWarning . ("expr in while must not return a value, but returned a " ++)) =<< showValue result
         go
 eval (EFor (Id name) from to expr) = loopContext go where
   go = do
@@ -187,7 +209,7 @@ eval (EFor (Id name) from to expr) = loopContext go where
     forM_ [fromVal .. toVal] $ \i -> do
       updateVar var (VInt i)
       result <- eval expr
-      when (result /= VNone) $ emitWarning $ "expr in for must not return a value, but returned: " ++ show result
+      when (result /= VNone) $ (emitWarning . ("expr in for must not return a value, but returned a " ++)) =<< showValue result
     return VNone
 eval EBreak       = do
   maybeCont <- liftM tigCont get
@@ -199,7 +221,9 @@ eval (ELet decs exprs) = sandbox $ do
   results <- mapM eval exprs
   return $ last (VNone : results)
 
-loopContext :: (PrimMonad m, Monad m) => TigressT r m Value -> TigressT r m Value
+-- | Executes go in loop. If go calls break during execution, the execution of go will be terminated and the control goes back to the
+-- | outside of loopContext.
+loopContext :: (PrimMonad m, Monad m) => TigressT r m (Value m) -> TigressT r m (Value m)
 loopContext go = sandbox $ callCC $ \cont -> do
   modify $ \s -> s { tigCont = Just cont }
   go
@@ -233,5 +257,11 @@ addDec newTigState (DFun (FunDec (Id name) params ty expr)) = do
     lift $ modifyMutVar newTigState $ \s -> s { funcmap = newfm } -- modifies newTigState, does not modify env in state
     return ()
 
-
+showValue :: (PrimMonad m, Monad m) => Value m -> TigressT r m String
+showValue (VStr str) = return str
+showValue (VInt i)   = return (show i)
+showValue (VRec {})  = throwError "TODO: show record"
+showValue (VArr {})  = throwError "TODO: show array"
+showValue VNil       = return "nil"
+showValue VNone      = return "(NONE)"
 
