@@ -27,6 +27,7 @@ Test-Suite test-parser
     other-modules:       TigressLexer, TigressParser
     build-depends:       base >=4 && <5, array >=0.4, mtl >=2.2, containers >=0.5, primitive >=0.5, test-framework >=0.8, HUnit >= 1.2, test-framework-hunit >=0.3
     hs-source-dirs:      src/, test/
+    default-language:    Haskell2010
 
 Test-Suite test-eval
     type:       exitcode-stdio-1.0
@@ -34,4 +35,5 @@ Test-Suite test-eval
     other-modules:       TigressLexer, TigressParser
     build-depends:       base >=4 && <5, array >=0.4, mtl >=2.2, containers >=0.5, primitive >=0.5, test-framework >=0.8, HUnit >= 1.2, test-framework-hunit >=0.3
     hs-source-dirs:      src/, test/
+    default-language:    Haskell2010
 
