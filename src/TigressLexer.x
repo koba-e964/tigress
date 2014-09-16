@@ -34,6 +34,7 @@ tokens :-
   "type"  { \_->TYPE }
   "var"   { \_->VAR }
   "while" { \_->WHILE }
+  "new"   { \_->NEW  }
   ","     { \_->COMMA }
   ":"     { \_->COLON }
   ";"     { \_->SEMICOLON}

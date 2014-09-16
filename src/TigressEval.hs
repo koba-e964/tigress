@@ -3,7 +3,7 @@ module TigressEval where
 
 import TigressExpr
 import Control.Applicative (Applicative)
-import Control.Monad (foldM, forM, forM_, liftM, when)
+import Control.Monad (foldM, forM, forM_, liftM, replicateM, when, (<=<))
 import Control.Monad.Cont (ContT, MonadCont, callCC, runContT)
 import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
 import Control.Monad.State (MonadState, StateT, evalStateT, get, modify, put)
@@ -14,7 +14,9 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 import Data.Primitive.MutVar (MutVar, modifyMutVar, newMutVar, readMutVar, writeMutVar)
+import qualified Data.Traversable as DT
 import Debug.Trace (trace)
+import GHC.Arr (unsafeAt)
 
 type Pos = Int -- the position of variable
 
@@ -31,7 +33,6 @@ instance MonadTrans (TigressT r) where
   lift = TigressT . lift . lift . lift
 
 -- value for tigress.
-
 data Value m = 
   VInt !Integer
   | VStr !String
@@ -40,6 +41,8 @@ data Value m =
   | VNil
   | VNone -- This shows that no values are returned.
   deriving Eq
+
+-- | Immutable value.
 data FreezedValue =
   FVInt !Integer
   | FVStr !String
@@ -67,9 +70,13 @@ runTigressExpr expr = runTigress $ do
   result <- eval expr
   freezeValue result
 
+-- | Freezes a value. FreezedValue cannot be modified.
 freezeValue :: (PrimMonad m, Monad m) => Value m -> TigressT r m FreezedValue
 freezeValue (VStr str) = return (FVStr str)
 freezeValue (VInt i)   = return (FVInt i)
+freezeValue (VRec {})  = throwError "TODO: freeze-value record"
+freezeValue (VArr ary) = liftM FVArr $ DT.mapM (freezeValue <=< readVar) ary
+freezeValue VNil       = return FVNil
 freezeValue VNone      = return FVNone
 
 
@@ -96,8 +103,18 @@ getVar (LId (Id name)) = do
      Just p  -> return p
      Nothing -> throwError $ "undefined variable: " ++ name
 getVar (LMem _ _) = throwError "TODO: getVar-mem"
-getVar (LIdx lv e) = throwError "TODO: getVar-index"
-
+getVar (LIdx lv e) = do {
+  aryOrErr <- getVar lv >>= readVar;
+  case aryOrErr of {
+    VArr ary -> do {
+      index <- liftM fromIntegral $ ensureInt =<< eval e;
+      let {length = rangeSize $ bounds ary;};
+      when (index < 0 || index >= length) $ throwError $ "array index out of bounds: " ++ show index ++ " (length=" ++ show length ++ ")";
+      return (unsafeAt ary index);
+    };
+    _        -> throwError "array expected";
+  };
+}
 readVar :: (PrimMonad m, Monad m) => VarRef m a -> TigressT r m a
 readVar var = lift $ readMutVar var
 updateVar :: (PrimMonad m, Monad m) => VarRef m (Value m) -> Value m -> TigressT r m ()
@@ -178,7 +195,12 @@ eval (ESeq ls) = do
   results <- forM ls eval
   return $ last (VNone : results)
 eval (ERec {}) = throwError "TODO: record"
-eval (EArr {}) = throwError "TODO: new-array"
+eval (EArr _typeid length initial) = do { -- ignores type-id and creates generic array. type is not checked in this interpreter.
+  initVal <- eval initial;
+  lenVal  <- liftM fromIntegral $ ensureInt =<< eval length;
+  ary <- liftM (listArray (0,lenVal-1)) $ replicateM lenVal (lift (newMutVar initVal));
+  return $ VArr ary;
+}
 eval (EIf cond e1) = do
   b <- ensureInt =<< eval cond
   when (b /= 0) $ do -- a nonzero value is regarded to be true.

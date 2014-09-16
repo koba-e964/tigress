@@ -34,6 +34,7 @@ TO {TO}
 TYPE {TYPE}
 VAR {VAR}
 WHILE {WHILE}
+NEW {NEW}
 "," {COMMA}
 ":" {COLON}
 ";" {SEMICOLON}
@@ -154,7 +155,7 @@ simpl_expr:
 | "(" ")" { ESeq [] }
 | "(" expr_seq ")" { ESeq $2 }
 | type_id "{" field_list "}" { ERec $1 $3 }
-| type_id "[" expr "]" OF expr { EArr $1 $3 $6 }
+| NEW type_id "[" expr "]" OF expr { EArr $2 $4 $7 }
 | BREAK  { EBreak }
 | LET declaration_list IN END          { ELet $2 [] }
 | LET declaration_list IN expr_seq END { ELet $2 $4 }
