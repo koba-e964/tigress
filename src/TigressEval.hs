@@ -50,7 +50,17 @@ data FreezedValue =
   | FVArr !(Array Int FreezedValue)
   | FVNil
   | FVNone -- This shows that no values are returned.
-  deriving (Eq, Show)
+  deriving Eq
+
+instance Show FreezedValue where
+  show (FVInt i) = show i
+  show (FVStr s) = show s
+  show (FVRec {}) = error "not supported: record"
+  show (FVArr ary) =
+    show (elems ary)    
+  show FVNil     = "nil"
+  show FVNone    = "(none)"
+  
 
 type VarRef m = MutVar (PrimState m)
 
