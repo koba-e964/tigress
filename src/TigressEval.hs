@@ -75,12 +75,17 @@ type VarMap m = Map String (VarRef m (Value m))
 
 data Function r m = 
   Function ![String] !(VarRef m (TigState r m)) !Expr
+  | FunNative !Int {- argc -} !([Value m] -> TigressT r m (Value m)) {- body -} -- for native function
 
 emptyTigState :: TigState r m
 emptyTigState = TigState {varmap = Map.empty, funcmap = Map.empty, tigCont = Nothing}
 
+stdlibTigState :: (PrimMonad m, Monad m) => TigState r m -- with standard library functions
+stdlibTigState = TigState {varmap = Map.empty, funcmap = Map.fromList [("printi", FunNative 1 nativePrinti), ("not", FunNative 1 nativeNot)], tigCont = Nothing}
+
+
 runTigress :: (PrimMonad m, Monad m) => TigConfig m -> TigressT (Either String a) m a -> m (Either String a)
-runTigress conf m = runReaderT (evalStateT (runContT (runExceptT $ invTigress m) return) emptyTigState) conf
+runTigress conf m = runReaderT (evalStateT (runContT (runExceptT $ invTigress m) return) stdlibTigState) conf
 
 runTigressExpr :: (PrimMonad m, Monad m) => TigConfig m -> Expr -> m (Either String FreezedValue)
 runTigressExpr conf expr = runTigress conf $ do
@@ -199,17 +204,19 @@ eval (EApp (Id name) args) = do
     Nothing -> throwError $ "undefined function: " ++ name
     Just (Function params tigState expr) -> do
       when (length params /= length args) (throwError $ "wrong number of arguments: " ++ show (length args) ++ " (expected: " ++ show (length params) ++ ")")
-      env <- readVar tigState
-      newenv <- foldM (\env (name, ex) -> do
-        val <- eval ex
-        newVar <- lift $ newMutVar val
-        return $ env { varmap = Map.insert name newVar (varmap env) }
-       ) env (zip params args)
-      oldenv <- get
-      put newenv
-      result <- eval expr
-      put oldenv
-      return result
+      sandbox $ do
+        env <- readVar tigState
+        newenv <- foldM (\env (name, ex) -> do
+          val <- eval ex
+          newVar <- lift $ newMutVar val
+          return $ env { varmap = Map.insert name newVar (varmap env) }
+         ) env (zip params args)
+        put newenv
+        eval expr
+    Just (FunNative argc body) -> do
+      when (argc /= length args) (throwError $ "wrong number of arguments: " ++ show (length args) ++ " (expected: " ++ show argc ++ ")")
+      argsVal <- mapM eval args
+      body argsVal
 eval (ESeq ls) = do
   results <- forM ls eval
   return $ last (VNone : results)
@@ -306,3 +313,22 @@ showValue (VArr {})  = throwError "TODO: show array"
 showValue VNil       = return "nil"
 showValue VNone      = return "(NONE)"
 
+
+{-
+  Functions that implements functions in standard library.
+    function printi(i : int)
+    function not(i : int) : int
+-}
+
+nativePrinti :: (PrimMonad m, Monad m) => [Value m] -> TigressT r m (Value m)
+nativePrinti [val] = do
+  ival <- ensureInt val
+  writer <- asks stdoutWriter
+  lift $ writer $ show ival
+  return VNone
+nativePrinti _ = undefined
+
+nativeNot :: (PrimMonad m, Monad m) => [Value m] -> TigressT r m (Value m)
+nativeNot [val] = do
+  ival <- ensureInt val
+  return $ VInt $ if ival == 0 then 1 else 0

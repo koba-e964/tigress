@@ -85,6 +85,8 @@ testsLogic = TF.testGroup "eval_logic" [
   ,evalCheck "eval_or2" "1 | 1/0"   (FVInt 1) -- | is lazy and does not evaluate 1/0
   ,evalCheck "eval_or3" "0 | 100"   (FVInt 1)
   ,evalCheck "eval_or4" "0 | 0"   (FVInt 0)
+  ,evalCheck "eval_not1" "not(0)"   (FVInt 1)
+  ,evalCheck "eval_not2" "not(100)"   (FVInt 0)
  ]
 testsLet :: TF.Test
 testsLet = TF.testGroup "eval_let" [
