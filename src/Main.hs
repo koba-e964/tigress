@@ -17,8 +17,8 @@ str = "let var N := 8 " ++
       "var diag1 := intArray [ N+N-1 ] of 0 " ++
       "in try(0) end"
 
-
-
+normalConfig :: TigConfig IO -- normal configuration
+normalConfig = TigConfig putStr (hPutStr stderr)
 main :: IO ()
 main = repl
 
@@ -33,7 +33,7 @@ repl = do
        Left err -> void $ print err
        Right expr -> do
          print expr
-         res <- TE.runTigressExpr expr
+         res <- TE.runTigressExpr normalConfig expr
          case res of
             Left err  -> void $ print err
             Right val ->

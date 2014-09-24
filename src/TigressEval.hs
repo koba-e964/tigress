@@ -6,6 +6,7 @@ import Control.Applicative (Applicative)
 import Control.Monad (foldM, forM, forM_, liftM, replicateM, when, (<=<))
 import Control.Monad.Cont (ContT, MonadCont, callCC, runContT)
 import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
+import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State (MonadState, StateT, evalStateT, get, modify, put)
 import Control.Monad.Trans (MonadTrans, lift)
 import Control.Monad.Primitive (PrimMonad, PrimState)
@@ -27,10 +28,16 @@ data TigState r m = TigState {
     ,tigCont :: Maybe (Value m -> TigressT r m (Value m))
 }
 
-newtype TigressT r m a = TigressT { invTigress :: ExceptT String (ContT r (StateT (TigState r m) m)) a } deriving (Functor, Applicative, Monad, MonadState (TigState r m), MonadError String, MonadCont)
+-- | Configuration for IO
+data TigConfig m = TigConfig {
+    stdoutWriter :: String -> m ()
+    ,stderrWriter :: String -> m ()
+}
+
+newtype TigressT r m a = TigressT { invTigress :: ExceptT String (ContT r (StateT (TigState r m) (ReaderT (TigConfig m) m))) a } deriving (Functor, Applicative, Monad, MonadState (TigState r m), MonadReader (TigConfig m), MonadError String, MonadCont)
 
 instance MonadTrans (TigressT r) where
-  lift = TigressT . lift . lift . lift
+  lift = TigressT . lift . lift . lift . lift
 
 -- value for tigress.
 data Value m = 
@@ -72,11 +79,11 @@ data Function r m =
 emptyTigState :: TigState r m
 emptyTigState = TigState {varmap = Map.empty, funcmap = Map.empty, tigCont = Nothing}
 
-runTigress :: (PrimMonad m, Monad m) => TigressT (Either String a) m a -> m (Either String a)
-runTigress m = evalStateT (runContT (runExceptT $ invTigress m) return) emptyTigState
+runTigress :: (PrimMonad m, Monad m) => TigConfig m -> TigressT (Either String a) m a -> m (Either String a)
+runTigress conf m = runReaderT (evalStateT (runContT (runExceptT $ invTigress m) return) emptyTigState) conf
 
-runTigressExpr :: (PrimMonad m, Monad m) => Expr -> m (Either String FreezedValue)
-runTigressExpr expr = runTigress $ do
+runTigressExpr :: (PrimMonad m, Monad m) => TigConfig m -> Expr -> m (Either String FreezedValue)
+runTigressExpr conf expr = runTigress conf $ do
   result <- eval expr
   freezeValue result
 
@@ -89,10 +96,12 @@ freezeValue (VArr ary) = liftM FVArr $ DT.mapM (freezeValue <=< readVar) ary
 freezeValue VNil       = return FVNil
 freezeValue VNone      = return FVNone
 
-
+-- | emitWarning writes the given error message to stderrWriter.
+-- | Newline is added after the given message (msg).
 emitWarning :: (PrimMonad m, Monad m) => String -> TigressT r m ()
-emitWarning msg = trace msg (return ())
-
+emitWarning msg = do
+  writer <- asks stderrWriter
+  lift (writer (msg ++ "\n"))
 newVariable :: (PrimMonad m, Monad m) => TigressT r m (VarRef m (Value m))
 newVariable = lift $ newMutVar VNone
 

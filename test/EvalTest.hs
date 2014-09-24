@@ -1,6 +1,6 @@
 module Main where
 
-import Control.Monad.ST (runST)
+import Control.Monad.ST (ST, runST)
 import Control.Monad.Identity (runIdentity)
 import System.Timeout (timeout)
 import qualified Test.Framework as TF
@@ -23,8 +23,11 @@ exprOfString str =
     Right x -> x
     Left  _ -> error $ "no parse: " ++ str
 
+testConfig :: TigConfig (ST s)
+testConfig = TigConfig (\_->return ()) (\_->return ())
+
 evalPure :: Expr -> Either String FreezedValue
-evalPure expr = runST (TE.runTigressExpr expr)
+evalPure expr = runST (TE.runTigressExpr testConfig expr)
 
 -- | Tests two values are equal. Checking will be terminated after 2000 milliseconds.
 testEq :: (Eq a, Show a) => String -> a -> a -> TF.Test
