@@ -45,7 +45,7 @@ data BinOp =
  | BGe
  | BAnd
  | BOr
-   deriving (Eq, Show)
+   deriving (Eq, Show, Ord)
 
 -- declarations
 data Dec =

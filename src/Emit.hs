@@ -35,20 +35,48 @@ codegenTop expr = do
 -- Operations
 -------------------------------------------------------------------------------
 
+eq :: AST.Operand -> AST.Operand -> Codegen AST.Operand
+neq :: AST.Operand -> AST.Operand -> Codegen AST.Operand
 lt :: AST.Operand -> AST.Operand -> Codegen AST.Operand
-lt a b = cmp IP.SLT a b
+gt :: AST.Operand -> AST.Operand -> Codegen AST.Operand
+le :: AST.Operand -> AST.Operand -> Codegen AST.Operand
+ge :: AST.Operand -> AST.Operand -> Codegen AST.Operand
 
-binops :: Map.Map String (AST.Operand -> AST.Operand -> Codegen AST.Operand)
+eq = cmp IP.EQ
+neq = cmp IP.NE
+lt = cmp IP.SLT
+gt = cmp IP.SGT
+le = cmp IP.SLE
+ge = cmp IP.SGE
+
+binops :: Map.Map BinOp (AST.Operand -> AST.Operand -> Codegen AST.Operand)
 binops = Map.fromList [
-      ("+", add)
-    , ("-", sub)
-    , ("*", mul)
-    , ("/", Codegen.div)
-    , ("<", lt)
+      (BAdd, add)
+    , (BSub, sub)
+    , (BMul, mul)
+    , (BDiv, Codegen.div)
+    , (BEq, eq)
+    , (BNeq, neq)
+    , (BLt, lt)
+    , (BGt, gt)
+    , (BLe, le)
+    , (BGe, ge)
+    , (BAnd, undefined)
+    , (BOr, undefined)
   ]
 
 cgen :: Expr -> Codegen AST.Operand
 cgen (EInt n) = return $ cons $ C.Int 64 n
+cgen (EMinus e) = do
+  operand <- cgen e
+  sub (cons (C.Int 64 0)) operand
+cgen (EBin bop e1 e2) = do
+  case Map.lookup bop binops of
+    Just op -> do
+      c1 <- cgen e1
+      c2 <- cgen e2
+      op c1 c2
+    Nothing -> error "invalid operator"
 
 -------------------------------------------------------------------------------
 -- Compilation
