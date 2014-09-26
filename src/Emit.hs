@@ -67,6 +67,9 @@ binops = Map.fromList [
 
 cgen :: Expr -> Codegen AST.Operand
 cgen (EInt n) = return $ cons $ C.Int 64 n
+cgen (ELValue lvalue) = do
+  var <- getPtr lvalue
+  load var
 cgen (EMinus e) = do
   operand <- cgen e
   sub (cons (C.Int 64 0)) operand
@@ -81,6 +84,8 @@ cgen (EAsgn lvalue expr) = do
   ptr <- getPtr lvalue
   val <- cgen expr
   store ptr val
+  return $ cons $ C.Undef AST.VoidType
+cgen (ESeq exprs) = cgenSeq exprs
 cgen (EIf cond expr) = do
   ifthen <- addBlock "if.then"
   ifexit <- addBlock "if.exit"
@@ -96,7 +101,7 @@ cgen (EIf cond expr) = do
   -- if.exit
   ------------------
   setBlock ifexit
-  return $ cons (C.Int 64 0)
+  return $ cons $ C.Undef AST.VoidType
 
 cgen (EIfElse cond etr efl) = do
   ifthen <- addBlock "if.then"
@@ -124,9 +129,27 @@ cgen (EIfElse cond etr efl) = do
   phi int64 [(trval, ifthenEnd), (flval, ifelseEnd)]
 
 
+cgen (ELet decs exprs) = do
+  mapM_ declare decs
+  cgenSeq exprs
+
+cgenSeq :: [Expr] -> Codegen AST.Operand
+cgenSeq [] = return $ cons $ C.Undef AST.VoidType
+cgenSeq ls = liftM last $ mapM cgen ls
+
 -- gets the pointer of lvalue
 getPtr :: LValue -> Codegen AST.Operand
 getPtr (LId (Id name)) = getvar name
+
+-- declaration
+declare :: Dec -> Codegen ()
+declare (DType _) = return ()
+declare (DVar (VarDec (Id name) _mtypeid expr)) = do
+  var <- alloca int64
+  assign name var
+  val <- cgen expr
+  store var val
+  return ()
 -------------------------------------------------------------------------------
 -- Compilation
 -------------------------------------------------------------------------------
