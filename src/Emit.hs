@@ -77,7 +77,56 @@ cgen (EBin bop e1 e2) = do
       c2 <- cgen e2
       op c1 c2
     Nothing -> error "invalid operator"
+cgen (EAsgn lvalue expr) = do
+  ptr <- getPtr lvalue
+  val <- cgen expr
+  store ptr val
+cgen (EIf cond expr) = do
+  ifthen <- addBlock "if.then"
+  ifexit <- addBlock "if.exit"
+  -- branch
+  ccond <- cgen cond
+  test <- cmp IP.EQ ccond (cons $ C.Int 64 0)
+  cbr test ifexit ifthen -- Branch based on the condition
+  -- if.then
+  ------------------
+  setBlock ifthen
+  trval <- cgen expr       -- Generate code for the true branch
+  br ifexit                -- Branch to the merge block
+  -- if.exit
+  ------------------
+  setBlock ifexit
+  return $ cons (C.Int 64 0)
 
+cgen (EIfElse cond etr efl) = do
+  ifthen <- addBlock "if.then"
+  ifelse <- addBlock "if.else"
+  ifexit <- addBlock "if.exit"
+  -- branch
+  ccond <- cgen cond
+  test <- cmp IP.EQ ccond (cons $ C.Int 64 0)
+  cbr test ifelse ifthen -- Branch based on the condition
+  -- if.then
+  ------------------
+  setBlock ifthen
+  trval <- cgen etr       -- Generate code for the true branch
+  br ifexit                -- Branch to the merge block
+  ifthenEnd <- getBlock
+  -- if.else
+  ------------------
+  setBlock ifelse
+  flval <- cgen efl       -- Generate code for the true branch
+  br ifexit                -- Branch to the merge block
+  ifelseEnd <- getBlock
+  -- if.exit
+  ------------------
+  setBlock ifexit
+  phi int64 [(trval, ifthenEnd), (flval, ifelseEnd)]
+
+
+-- gets the pointer of lvalue
+getPtr :: LValue -> Codegen AST.Operand
+getPtr (LId (Id name)) = getvar name
 -------------------------------------------------------------------------------
 -- Compilation
 -------------------------------------------------------------------------------
@@ -94,3 +143,4 @@ codegen mod fns = withContext $ \context ->
   where
     modn    = mapM codegenTop fns
     newast  = runLLVM mod modn
+
