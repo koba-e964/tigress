@@ -23,8 +23,15 @@ import TigressExpr
 {- Reference: https://github.com/sdiehl/kaleidoscope -}
 
 codegenTop :: Expr -> LLVM ()
-codegenTop expr = do
-  define double "main" [] blks
+
+codegenTop (ELet decs exprs) = do
+  mapM_ declareTop decs
+  codegenTopSub (ELet decs exprs)
+codegenTop expr = codegenTopSub expr
+
+codegenTopSub :: Expr -> LLVM ()
+codegenTopSub expr = do
+  define int64 "main" [] blks
   where
     blks = createBlocks $ execCodegen $ do
       entry <- addBlock entryBlockName
@@ -143,6 +150,8 @@ getPtr (LId (Id name)) = getvar name
 
 -- declaration
 declare :: Dec -> Codegen ()
+declareTop :: Dec -> LLVM ()
+
 declare (DType _) = return ()
 declare (DVar (VarDec (Id name) _mtypeid expr)) = do
   var <- alloca int64
@@ -150,6 +159,24 @@ declare (DVar (VarDec (Id name) _mtypeid expr)) = do
   val <- cgen expr
   store var val
   return ()
+declare _ = return ()
+
+
+declareTop (DFun (FunDec (Id name) typefields typeid body)) =
+  define int64 name largs bls
+  where
+    largs = map (\(TypeField (Id x) typeid) -> (int64, AST.Name x)) typefields
+    bls = createBlocks $ execCodegen $ do
+      entry <- addBlock entryBlockName
+      setBlock entry
+      forM typefields $ \(TypeField (Id x) typeid) -> do
+        var <- alloca int64
+        store var (local (AST.Name x))
+        assign x var
+      cgen body >>= ret
+  
+declareTop _ = return ()
+
 -------------------------------------------------------------------------------
 -- Compilation
 -------------------------------------------------------------------------------
