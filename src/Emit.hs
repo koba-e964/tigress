@@ -92,6 +92,9 @@ cgen (EAsgn lvalue expr) = do
   val <- cgen expr
   store ptr val
   return $ cons $ C.Undef AST.VoidType
+cgen (EApp (Id name) args) = do
+  valArgs <- mapM cgen args
+  call (externf (AST.Name name)) valArgs
 cgen (ESeq exprs) = cgenSeq exprs
 cgen (EIf cond expr) = do
   ifthen <- addBlock "if.then"
