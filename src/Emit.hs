@@ -19,6 +19,7 @@ import qualified LLVM.General.AST.IntegerPredicate as IP
 
 import Codegen
 import TigressExpr
+import JIT
 
 {- Reference: https://github.com/sdiehl/kaleidoscope -}
 
@@ -188,11 +189,14 @@ liftError :: ExceptT String IO a -> IO a
 liftError = runExceptT >=> either fail return
 
 codegen :: AST.Module -> [Expr] -> IO AST.Module
-codegen mod fns = withContext $ \context ->
-  liftError $ withModuleFromAST context newast $ \m -> do
-    llstr <- moduleLLVMAssembly m
-    putStrLn llstr
-    return newast
+codegen mod fns = do
+  runJIT newast 0
+  runJIT newast 2
+  runJIT newast 4
+  withContext $ \context ->
+    liftError $ withModuleFromAST context newast $ \m -> do
+      llstr <- moduleLLVMAssembly m
+      return newast
   where
     modn    = mapM codegenTop fns
     newast  = runLLVM mod modn
