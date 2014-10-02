@@ -34,29 +34,31 @@ foreign import ccall "dynamic" haskFun :: FunPtr (IO Int64) -> IO Int64
 run :: FunPtr a -> IO Int64
 run fn = haskFun (castFunPtr fn :: FunPtr (IO Int64)) --- functions in tigress should return int64
 
-jit :: Context -> Word -> (EE.MCJIT -> IO a) -> IO a
-jit c opt = EE.withMCJIT c optlevel model ptrelim fastins
+jit :: Context ->  (EE.MCJIT -> IO a) -> IO a
+jit c = EE.withMCJIT c optlevel model ptrelim fastins
   where
-    optlevel = Just opt  -- optimization level
+    optlevel = Just 0  -- optimization level
     model    = Nothing -- code model ( Default )
     ptrelim  = Nothing -- frame pointer elimination
     fastins  = Nothing -- fast instruction selection
 
-passes :: PassSetSpec
-passes = defaultCuratedPassSetSpec { optLevel = Just 3 }
+-- | Returns passes whose level is 'opt'.
+passes :: Word -> PassSetSpec
+passes opt = defaultCuratedPassSetSpec { optLevel = Just opt }
 
+-- | Takes a module, optimizes it, executes it, and returns the optimized module.
+-- | The level of optimization is specified by 'opt'.
 runJIT :: AST.Module -> Word -> IO (Either String AST.Module)
 runJIT mod opt = do
   withContext $ \context ->
-    jit context opt $ \executionEngine ->
+    jit context $ \executionEngine ->
       runExceptT $ withModuleFromAST context mod $ \m ->
-        withPassManager passes $ \pm -> do
+        withPassManager (passes opt) $ \pm -> do
           -- Optimization Pass
           runPassManager pm m
           optmod <- moduleAST m
-          s <- moduleLLVMAssembly m
-          putStrLn s
 
+          -- Execution. Slightly optimized by jit compiler.
           EE.withModuleInEngine executionEngine m $ \ee -> do
             mainfn <- EE.getFunction ee (AST.Name "main")
             case mainfn of

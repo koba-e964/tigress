@@ -188,15 +188,16 @@ declareTop _ = return ()
 liftError :: ExceptT String IO a -> IO a
 liftError = runExceptT >=> either fail return
 
+-- | Compiles 'fns' in the module 'mod' and returns new module.
+-- | This prints the unoptimized module, but returns the optimized module.
 codegen :: AST.Module -> [Expr] -> IO AST.Module
 codegen mod fns = do
-  runJIT newast 0
-  runJIT newast 2
-  runJIT newast 4
   withContext $ \context ->
     liftError $ withModuleFromAST context newast $ \m -> do
       llstr <- moduleLLVMAssembly m
-      return newast
+      putStrLn "Code before optimization:"
+      putStrLn llstr
+  either fail return =<< runJIT newast 3 -- optimization level = 3
   where
     modn    = mapM codegenTop fns
     newast  = runLLVM mod modn
