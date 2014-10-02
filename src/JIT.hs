@@ -50,14 +50,13 @@ passes opt = defaultCuratedPassSetSpec { optLevel = Just opt }
 -- | The level of optimization is specified by 'opt'.
 runJIT :: AST.Module -> Word -> IO (Either String AST.Module)
 runJIT mod opt = do
-  withContext $ \context ->
-    jit context $ \executionEngine ->
-      runExceptT $ withModuleFromAST context mod $ \m ->
-        withPassManager (passes opt) $ \pm -> do
-          -- Optimization Pass
-          runPassManager pm m
-          optmod <- moduleAST m
-
+  withContext $ \context -> do
+    runExceptT $ withModuleFromAST context mod $ \m -> do
+      optmod <- withPassManager (passes opt) $ \pm -> do
+        -- Optimization Pass
+        runPassManager pm m
+        moduleAST m
+      jit context $ \executionEngine ->
           -- Execution. Slightly optimized by jit compiler.
           EE.withModuleInEngine executionEngine m $ \ee -> do
             mainfn <- EE.getFunction ee (AST.Name "main")
@@ -66,6 +65,6 @@ runJIT mod opt = do
                 res <- run fn
                 putStrLn $ "Evaluated to: " ++ show res
               Nothing -> return ()
+      -- Return the optimized module
+      return optmod
 
-          -- Return the optimized module
-          return optmod
