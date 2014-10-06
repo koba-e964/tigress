@@ -22,6 +22,7 @@ import System.Console.GetOpt
 import Codegen
 import TigressExpr
 import Emit
+import JIT
 import TigressLexer as TL
 import TigressParser as TP
 
@@ -65,10 +66,16 @@ repl = do
        Right expr -> do
          print expr
          newmod <- codegen (emptyModule "JITtest") [expr]
+         optmod <- optimize newmod (Just 3)
          withContext $ \ctx -> do
            runExceptT $ withModuleFromAST ctx newmod $ \mm -> do
+             putStrLn "***** Module before optimization *****"
+             s <- moduleLLVMAssembly mm
+             putStrLn s
+           runExceptT $ withModuleFromAST ctx optmod $ \mm -> do
              putStrLn "***** Optimized Module *****"
              s <- moduleLLVMAssembly mm
              putStrLn s
+         runJIT optmod >>= either fail (\x -> putStrLn ("result = " ++ show x))
          repl
 

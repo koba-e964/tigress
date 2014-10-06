@@ -42,29 +42,18 @@ jit c = EE.withMCJIT c optlevel model ptrelim fastins
     ptrelim  = Nothing -- frame pointer elimination
     fastins  = Nothing -- fast instruction selection
 
--- | Returns passes whose level is 'opt'.
-passes :: Word -> PassSetSpec
-passes opt = defaultCuratedPassSetSpec { optLevel = Just opt }
-
--- | Takes a module, optimizes it, executes it, and returns the optimized module.
--- | The level of optimization is specified by 'opt'.
-runJIT :: AST.Module -> Word -> IO (Either String AST.Module)
-runJIT mod opt = do
+-- | Takes a module, executes it, and returns the result.
+runJIT :: AST.Module -> IO (Either String (Maybe Int64))
+runJIT mod = do
   withContext $ \context -> do
     runExceptT $ withModuleFromAST context mod $ \m -> do
-      optmod <- withPassManager (passes opt) $ \pm -> do
-        -- Optimization Pass
-        runPassManager pm m
-        moduleAST m
       jit context $ \executionEngine ->
-          -- Execution. Slightly optimized by jit compiler.
-          EE.withModuleInEngine executionEngine m $ \ee -> do
-            mainfn <- EE.getFunction ee (AST.Name "main")
-            case mainfn of
-              Just fn -> do
-                res <- run fn
-                putStrLn $ "Evaluated to: " ++ show res
-              Nothing -> return ()
-      -- Return the optimized module
-      return optmod
+        -- Execution. Slightly optimized by jit compiler.
+        EE.withModuleInEngine executionEngine m $ \ee -> do
+          mainfn <- EE.getFunction ee (AST.Name "main")
+          case mainfn of
+            Just fn -> do
+              res <- run fn
+              return $ Just res
+            Nothing -> return Nothing
 

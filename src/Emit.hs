@@ -16,6 +16,9 @@ import Control.Monad.Except
 import Control.Applicative
 import qualified Data.Map as Map
 import qualified LLVM.General.AST.IntegerPredicate as IP
+import LLVM.General.PassManager
+import LLVM.General.Transforms
+import LLVM.General.Analysis
 
 import Codegen
 import TigressExpr
@@ -191,14 +194,23 @@ liftError = runExceptT >=> either fail return
 -- | Compiles 'fns' in the module 'mod' and returns new module.
 -- | This prints the unoptimized module, but returns the optimized module.
 codegen :: AST.Module -> [Expr] -> IO AST.Module
-codegen mod fns = do
-  withContext $ \context ->
-    liftError $ withModuleFromAST context newast $ \m -> do
-      llstr <- moduleLLVMAssembly m
-      putStrLn "Code before optimization:"
-      putStrLn llstr
-  either fail return =<< runJIT newast 3 -- optimization level = 3
+codegen mod fns = return newast
   where
     modn    = mapM codegenTop fns
     newast  = runLLVM mod modn
+
+-- | Optimizes a module. Optimization level is specified in parameter 'opt'.
+optimize :: AST.Module -> Maybe Word -> IO AST.Module
+optimize mod opt = (either fail return =<<) $
+  withContext $ \context -> do
+    runExceptT $ withModuleFromAST context mod $ \m -> do
+      withPassManager (passes opt) $ \pm -> do
+        -- Optimization Pass
+        runPassManager pm m
+        moduleAST m
+
+-- | Returns passes whose level is 'opt'.
+passes :: Maybe Word -> PassSetSpec
+passes opt = defaultCuratedPassSetSpec { optLevel = opt }
+
 
