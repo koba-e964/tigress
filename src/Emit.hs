@@ -161,6 +161,32 @@ cgen (EWhile cond body) = do
   setBlock whileExit
   return $ cons $ C.Undef AST.VoidType
 
+cgen (EFor (Id name) begin end body) = do
+  forCond  <- addBlock "for.cond"
+  forBegin <- addBlock "for.begin"
+  forExit  <- addBlock "for.exit"
+  cend <- cgen end -- Evaluation order of 'end' and 'begin' is not specified. In this implementation, 'end' is evaluated first.
+  var <- alloca int64
+  assign name var
+  cbeg <- cgen begin -- 'begin' is evaluated second.
+  store var cbeg
+  br forCond
+  -- for.cond
+  setBlock forCond
+  curVal <- load var
+  ccond <- le curVal cend
+  cbr ccond forBegin forExit
+  -- for.begin
+  setBlock forBegin
+  cgen body
+  curValBody <- load var
+  newCurVal <- add curValBody (cons (C.Int 64 1))
+  store var newCurVal
+  br forCond
+  -- for.exit
+  setBlock forExit
+  return $ cons $ C.Undef AST.VoidType -- TODO: type error occurs if this value is regarded as int64.
+
 cgen (ELet decs exprs) = do
   mapM_ declare decs
   cgenSeq exprs
