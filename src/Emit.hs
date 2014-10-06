@@ -100,6 +100,8 @@ cgen (EApp (Id name) args) = do
   valArgs <- mapM cgen args
   call (externf (AST.Name name)) valArgs
 cgen (ESeq exprs) = cgenSeq exprs
+cgen (ERec {}) = error "TODO: codegen-record"
+cgen (EArr {}) = error "TODO: codegen-array"
 cgen (EIf cond expr) = do
   ifthen <- addBlock "if.then"
   ifexit <- addBlock "if.exit"
@@ -142,6 +144,22 @@ cgen (EIfElse cond etr efl) = do
   setBlock ifexit
   phi int64 [(trval, ifthenEnd), (flval, ifelseEnd)]
 
+cgen (EWhile cond body) = do
+  whileCond  <- addBlock "while.cond"
+  whileBegin <- addBlock "while.begin"
+  whileExit  <- addBlock "while.exit"
+  br whileCond
+  -- while.cond
+  setBlock whileCond
+  ccond <- cgen cond
+  cbr ccond whileBegin whileExit
+  -- while.begin
+  setBlock whileBegin
+  _ <- cgen body
+  br whileCond
+  -- while.exit
+  setBlock whileExit
+  return $ cons $ C.Undef AST.VoidType
 
 cgen (ELet decs exprs) = do
   mapM_ declare decs
