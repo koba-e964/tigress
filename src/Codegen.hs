@@ -67,6 +67,10 @@ external retty label argtys = addDefn $
 double :: AST.Type
 double = FloatingPointType 64 IEEE
 
+-- 1-bit integer (boolean)
+int1 :: AST.Type
+int1 = IntegerType 1
+
 -- 32-bit integer
 int32 :: AST.Type
 int32 = IntegerType 32
@@ -248,7 +252,17 @@ div :: Operand -> Operand -> Codegen Operand
 div a b = instr $ SDiv False a b []
 
 cmp :: IP.IntegerPredicate -> Operand -> Operand -> Codegen Operand
-cmp cond a b = instr $ ICmp cond a b []
+cmp cond a b =
+  boolToInt64 =<< instr (ICmp cond a b [])
+  
+-- | zero-extension from boolean(i1) to int64
+-- | false -> 0, true -> 1
+boolToInt64 :: Operand -> Codegen Operand
+boolToInt64 operand = instr $ ZExt operand int64 []
+
+-- | Truncation from int64 to boolean(i1).
+int64ToBool :: Operand -> Codegen Operand
+int64ToBool operand = instr $ Trunc operand int1 [] 
 
 cons :: C.Constant -> Operand
 cons = ConstantOperand
@@ -274,7 +288,9 @@ br :: Name -> Codegen (Named Terminator)
 br val = terminator $ Do $ Br val []
 
 cbr :: Operand -> Name -> Name -> Codegen (Named Terminator)
-cbr cond tr fl = terminator $ Do $ CondBr cond tr fl []
+cbr cond tr fl = do
+  condBool <- int64ToBool cond
+  terminator $ Do $ CondBr condBool tr fl []
 
 phi :: AST.Type -> [(Operand, Name)] -> Codegen Operand
 phi ty incoming = instr $ Phi ty incoming []
