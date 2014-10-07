@@ -108,6 +108,7 @@ data CodegenState
   , blockCount   :: Int                      -- Count of basic blocks
   , count        :: Word                     -- Count of unnamed instructions
   , names        :: Names                    -- Name Supply
+  , loopExits    :: [Name]                   -- loop exit info
   } deriving Show
 
 data BlockState
@@ -143,7 +144,7 @@ emptyBlock :: Int -> BlockState
 emptyBlock i = BlockState i [] Nothing
 
 emptyCodegen :: CodegenState
-emptyCodegen = CodegenState (Name entryBlockName) Map.empty [] 1 0 Map.empty
+emptyCodegen = CodegenState (Name entryBlockName) Map.empty [] 1 0 Map.empty []
 
 execCodegen :: Codegen a -> CodegenState
 execCodegen m = execState (runCodegen m) emptyCodegen
@@ -197,6 +198,25 @@ setBlock bname = do
 getBlock :: Codegen Name
 getBlock = gets currentBlock
 
+setLoopExits :: [Name] -> Codegen ()
+setLoopExits bname = do
+  modify $ \s -> s { loopExits = bname }
+
+getLoopExits :: Codegen [Name]
+getLoopExits = gets loopExits
+
+pushLoopExit :: Name -> Codegen ()
+pushLoopExit bname = do
+   modify $ \s -> s { loopExits = bname : loopExits s }
+
+popLoopExit :: Codegen (Maybe Name)
+popLoopExit = do
+  result <- gets loopExits
+  case result of
+    []    -> return Nothing
+    (x:rest) -> do
+      setLoopExits rest
+      return (Just x)
 modifyBlock :: BlockState -> Codegen ()
 modifyBlock new = do
   active <- gets currentBlock

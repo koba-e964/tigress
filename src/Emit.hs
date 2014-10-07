@@ -152,6 +152,7 @@ cgen (EWhile cond body) = do
   -- while.cond
   setBlock whileCond
   ccond <- cgen cond
+  pushLoopExit whileExit
   cbr ccond whileBegin whileExit
   -- while.begin
   setBlock whileBegin
@@ -159,6 +160,7 @@ cgen (EWhile cond body) = do
   br whileCond
   -- while.exit
   setBlock whileExit
+  _ <- popLoopExit
   return $ cons $ C.Undef AST.VoidType
 
 cgen (EFor (Id name) begin end body) = do
@@ -170,6 +172,7 @@ cgen (EFor (Id name) begin end body) = do
   assign name var
   cbeg <- cgen begin -- 'begin' is evaluated second.
   store var cbeg
+  pushLoopExit forExit
   br forCond
   -- for.cond
   setBlock forCond
@@ -185,7 +188,17 @@ cgen (EFor (Id name) begin end body) = do
   br forCond
   -- for.exit
   setBlock forExit
+  _ <- popLoopExit
   return $ cons $ C.Undef AST.VoidType -- TODO: type error occurs if this value is regarded as int64.
+
+-- TODO Not working correctly. The break statement is not correctly compiled into branch instruction.
+cgen EBreak = do
+  lExit <- popLoopExit
+  case lExit of
+    Nothing    -> error "break not in loop"
+    Just block -> do
+      br block
+      return $ cons $ C.Undef AST.VoidType
 
 cgen (ELet decs exprs) = do
   mapM_ declare decs
