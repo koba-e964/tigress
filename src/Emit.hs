@@ -193,11 +193,16 @@ cgen (EFor (Id name) begin end body) = do
 
 -- TODO Not working correctly. The break statement is not correctly compiled into branch instruction.
 cgen EBreak = do
+  breaker <- addBlock "breaker"
+  dummy   <- addBlock "break.dummy"
   lExit <- popLoopExit
   case lExit of
     Nothing    -> error "break not in loop"
     Just block -> do
+      br breaker
+      setBlock breaker
       br block
+      setBlock dummy
       return $ cons $ C.Undef AST.VoidType
 
 cgen (ELet decs exprs) = do

@@ -124,8 +124,8 @@ testsLet = TF.testGroup "eval_let" [
 
 testsLoop :: TF.Test
 testsLoop = TF.testGroup "eval_loop" [
-  evalCheck "eval_for1" "for i := 0 to 10 do 2" Nothing -- "for" returns no value
-  ,evalCheck "eval_for2" "let var sum := 0 in for i := 0 to 10 do sum := sum + i; sum end" (Just 55)
+  --evalCheck "eval_for1" "for i := 0 to 10 do 2" Nothing -- "for" returns no value
+  evalCheck "eval_for2" "let var sum := 0 in for i := 0 to 10 do sum := sum + i; sum end" (Just 55)
   ,evalCheck "eval_while1" "let var sum := 0 var i := 0 in while i <= 10 do (sum := sum + i; i := i + 1); sum end" (Just 55)
   ,evalCheck "eval_while2" "let var i := 1 in while i <= 100 do i := i + i; i end" (Just 128)  
   ,evalCheck "eval_break1" "let var sum := 0 in for i := 0 to 10 do (sum := sum + i; if i >= 4 then break); sum end" (Just 10)
