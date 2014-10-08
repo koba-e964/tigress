@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving, MultiParamTypeClasses, TypeSynonymInstances #-}
 module Codegen where
 
 import Data.Word
@@ -7,6 +7,7 @@ import Data.Function
 import qualified Data.Map as Map
 import Control.Monad.State
 import Control.Applicative
+import Control.Monad.Except
 
 import LLVM.General.AST
 import LLVM.General.AST.Global
@@ -114,8 +115,12 @@ data BlockState
 -- Codegen Operations
 -------------------------------------------------------------------------------
 
-newtype Codegen a = Codegen { runCodegen :: State CodegenState a }
+newtype Codegen a = Codegen { unCodegen :: State CodegenState a }
   deriving (Functor, Applicative, Monad, MonadState CodegenState )
+
+instance MonadError String Codegen where
+  throwError = error
+  catchError = undefined
 
 sortBlocks :: [(Name, BlockState)] -> [(Name, BlockState)]
 sortBlocks = sortBy (compare `on` (idx . snd))
@@ -139,7 +144,10 @@ emptyCodegen :: CodegenState
 emptyCodegen = CodegenState (Name entryBlockName) Map.empty [] 1 0 Map.empty []
 
 execCodegen :: Codegen a -> CodegenState
-execCodegen m = execState (runCodegen m) emptyCodegen
+execCodegen m = execState (unCodegen m) emptyCodegen
+
+runCodegen :: Codegen a -> (a, CodegenState)
+runCodegen m = runState (unCodegen m) emptyCodegen
 
 fresh :: Codegen Word
 fresh = do
@@ -297,8 +305,10 @@ toArgs :: [Operand] -> [(Operand, [A.ParameterAttribute])]
 toArgs = map (\x -> (x, []))
 
 -- Effects
-call :: Operand -> [Operand] -> Codegen Operand
-call fn args = instr $ Call False CC.C [] (Right fn) (toArgs args) [] []
+call :: Operand -> [Operand] -> Codegen (AST.Type, Operand)
+call fn args = do
+  val <- instr $ Call False CC.C [] (Right fn) (toArgs args) [] []
+  return (int64, val) -- TODO support arbitrary type
 
 alloca :: AST.Type -> Codegen Operand
 alloca ty = instr $ Alloca ty Nothing 0 []
@@ -318,8 +328,14 @@ cbr cond tr fl = do
   condBool <- int64ToBool cond
   terminator $ Do $ CondBr condBool tr fl []
 
-phi :: AST.Type -> [(Operand, Name)] -> Codegen Operand
-phi ty incoming = instr $ Phi ty incoming []
+phi :: [((AST.Type, Operand), Name)] -> Codegen (AST.Type, Operand)
+phi incoming = do
+  when (null incoming) $ throwError $ "null phi node: " ++ show incoming
+  let types = map (fst . fst) incoming
+  when (any (/= head types) types) $ throwError $ "invalid phi node (type error):" ++ show incoming
+  let ty = head types
+  result <- instr $ Phi ty (map ( \((_ty, operand), nodeName) -> (operand, nodeName)) incoming) []
+  return (ty, result)
 
 ret :: Operand -> Codegen (Named Terminator)
 ret val = terminator $ Do $ Ret (Just val) []

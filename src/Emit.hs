@@ -28,12 +28,17 @@ codegenTop expr = codegenTopSub expr
 
 codegenTopSub :: Expr -> LLVM ()
 codegenTopSub expr = do
-  define int64 "main" [] blks
+  define retty "main" [] blks
   where
-    blks = createBlocks $ execCodegen $ do
+    (retty, codegenState) = runCodegen $ do
       entryBlock <- addBlock entryBlockName
       _ <- setBlock entryBlock
-      cgen expr >>= ret
+      (ty, val) <- cgen expr
+      _ <- case ty of
+        AST.VoidType -> retNone
+        _            -> ret val
+      return ty
+    blks = createBlocks codegenState
 
 binops :: Map.Map BinOp (AST.Operand -> AST.Operand -> Codegen AST.Operand)
 binops = Map.fromList [
@@ -51,30 +56,41 @@ binops = Map.fromList [
     , (BOr, undefined)
   ]
 
-cgen :: Expr -> Codegen AST.Operand
+checkType :: AST.Type -> (AST.Type, AST.Operand) -> Codegen AST.Operand
+checkType ty (realTy, realVal) = do
+  when (ty /= realTy) (throwError $ "Type error (expected: " ++ show ty ++ ", actual: " ++ show realTy ++ ")")
+  return realVal
+
+voidValue :: (AST.Type, AST.Operand)
+voidValue = (AST.VoidType, cons $ C.Undef AST.VoidType)
+
+cgen :: Expr -> Codegen (AST.Type, AST.Operand)
 cgen (EStr _) = error "TODO: string-codegen"
-cgen (EInt n) = return $ cons $ C.Int 64 n
+cgen (EInt n) = return $ (int64, cons $ C.Int 64 n)
 cgen ENil     = error "TODO: nil"
 cgen (ELValue lvalue) = do
   var <- getPtr lvalue
-  load var
+  val <- load var
+  return (int64, val)
 cgen (EMinus e) = do
-  operand <- cgen e
-  sub (cons (C.Int 64 0)) operand
+  operand <- checkType int64 =<< cgen e
+  val <- sub (cons (C.Int 64 0)) operand
+  return (int64, val)
 cgen (EBin bop e1 e2) = do
   case Map.lookup bop binops of
     Just op -> do
-      c1 <- cgen e1
-      c2 <- cgen e2
-      op c1 c2
+      c1 <- cgen e1 >>= checkType int64
+      c2 <- cgen e2 >>= checkType int64
+      val <- op c1 c2
+      return (int64, val)
     Nothing -> error "invalid operator"
 cgen (EAsgn lvalue expr) = do
   ptr <- getPtr lvalue
-  val <- cgen expr
+  val <- cgen expr >>= checkType int64
   _ <- store ptr val
-  return $ cons $ C.Undef AST.VoidType
+  return voidValue
 cgen (EApp (Id name) args) = do
-  valArgs <- mapM cgen args
+  valArgs <- mapM (cgen >=> checkType int64) args
   call (externf (AST.Name name)) valArgs
 cgen (ESeq exprs) = cgenSeq exprs
 cgen (ERec {}) = error "TODO: codegen-record"
@@ -83,7 +99,7 @@ cgen (EIf cond expr) = do
   ifthen <- addBlock "if.then"
   ifexit <- addBlock "if.exit"
   -- branch
-  ccond <- cgen cond
+  ccond <- cgen cond >>= checkType int64
   test <- cmp IP.EQ ccond (cons $ C.Int 64 0)
   _ <- cbr test ifexit ifthen -- Branch based on the condition
   -- if.then
@@ -94,14 +110,14 @@ cgen (EIf cond expr) = do
   -- if.exit
   ------------------
   setBlock ifexit
-  return $ cons $ C.Undef AST.VoidType
+  return voidValue
 
 cgen (EIfElse cond etr efl) = do
   ifthen <- addBlock "if.then"
   ifelse <- addBlock "if.else"
   ifexit <- addBlock "if.exit"
   -- branch
-  ccond <- cgen cond
+  ccond <- cgen cond >>= checkType int64
   test <- cmp IP.EQ ccond (cons $ C.Int 64 0)
   _ <- cbr test ifelse ifthen -- Branch based on the condition
   -- if.then
@@ -119,7 +135,7 @@ cgen (EIfElse cond etr efl) = do
   -- if.exit
   ------------------
   setBlock ifexit
-  phi int64 [(trval, ifthenEnd), (flval, ifelseEnd)]
+  phi [(trval, ifthenEnd), (flval, ifelseEnd)]
 
 cgen (EWhile cond body) = do
   whileCond  <- addBlock "while.cond"
@@ -128,7 +144,7 @@ cgen (EWhile cond body) = do
   _ <- br whileCond
   -- while.cond
   setBlock whileCond
-  ccond <- cgen cond
+  ccond <- cgen cond >>= checkType int64
   pushLoopExit whileExit
   _ <- cbr ccond whileBegin whileExit
   -- while.begin
@@ -138,16 +154,16 @@ cgen (EWhile cond body) = do
   -- while.exit
   setBlock whileExit
   _ <- popLoopExit
-  return $ cons $ C.Undef AST.VoidType
+  return voidValue
 
 cgen (EFor (Id name) begin end body) = do
   forCond  <- addBlock "for.cond"
   forBegin <- addBlock "for.begin"
   forExit  <- addBlock "for.exit"
-  cend <- cgen end -- Evaluation order of 'end' and 'begin' is not specified. In this implementation, 'end' is evaluated first.
+  cend <- cgen end >>= checkType int64 -- Evaluation order of 'end' and 'begin' is not specified. In this implementation, 'end' is evaluated first.
   var <- alloca int64
   assign name var
-  cbeg <- cgen begin -- 'begin' is evaluated second.
+  cbeg <- cgen begin >>= checkType int64 -- 'begin' is evaluated second.
   _ <- store var cbeg
   pushLoopExit forExit
   _ <- br forCond
@@ -166,7 +182,7 @@ cgen (EFor (Id name) begin end body) = do
   -- for.exit
   setBlock forExit
   _ <- popLoopExit
-  return $ cons $ C.Undef AST.VoidType -- TODO: type error occurs if this value is regarded as int64.
+  return voidValue
 
 cgen EBreak = do
   breaker <- addBlock "breaker"
@@ -179,14 +195,14 @@ cgen EBreak = do
       setBlock breaker
       _ <- br block
       setBlock dummy
-      return $ cons $ C.Undef AST.VoidType
+      return voidValue
 
 cgen (ELet decs exprs) = do
   mapM_ declare decs
   cgenSeq exprs
 
-cgenSeq :: [Expr] -> Codegen AST.Operand
-cgenSeq [] = return $ cons $ C.Undef AST.VoidType
+cgenSeq :: [Expr] -> Codegen (AST.Type, AST.Operand)
+cgenSeq [] = return voidValue
 cgenSeq ls = liftM last $ mapM cgen ls
 
 -- gets the pointer of lvalue
@@ -204,7 +220,7 @@ declare (DType _) = return ()
 declare (DVar (VarDec (Id name) _mtypeid expr)) = do
   var <- alloca int64
   assign name var
-  val <- cgen expr
+  val <- cgen expr >>= checkType int64
   _ <- store var val
   return ()
 declare _ = return ()
@@ -221,7 +237,10 @@ declareTop (DFun (FunDec (Id name) typefields _rettypeid body)) =
         var <- alloca int64
         _ <- store var (local (AST.Name x))
         assign x var
-      cgen body >>= ret
+      (ty, val) <- cgen body
+      case ty of
+        AST.VoidType -> retNone
+        _            -> ret val
   
 declareTop _ = return ()
 
