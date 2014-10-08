@@ -16,7 +16,6 @@ import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 import Data.Primitive.MutVar (MutVar, modifyMutVar, newMutVar, readMutVar, writeMutVar)
 import qualified Data.Traversable as DT
-import Debug.Trace (trace)
 import GHC.Arr (unsafeAt)
 
 type Pos = Int -- the position of variable
@@ -131,10 +130,10 @@ getVar (LIdx lv e) = do {
   aryOrErr <- getVar lv >>= readVar;
   case aryOrErr of {
     VArr ary -> do {
-      index <- liftM fromIntegral $ ensureInt =<< eval e;
-      let {length = rangeSize $ bounds ary;};
-      when (index < 0 || index >= length) $ throwError $ "array index out of bounds: " ++ show index ++ " (length=" ++ show length ++ ")";
-      return (unsafeAt ary index);
+      ind <- liftM fromIntegral $ ensureInt =<< eval e;
+      let {lenVal = rangeSize $ bounds ary;};
+      when (ind < 0 || ind >= lenVal) $ throwError $ "array index out of bounds: " ++ show ind ++ " (length=" ++ show lenVal ++ ")";
+      return (unsafeAt ary ind);
     };
     _        -> throwError "array expected";
   };
@@ -172,7 +171,7 @@ eval (EBin op e1 e2) =
       let opInt = fromJust (lookup op ops)
       return $ VInt $ opInt i1 i2
    where
-         bToI op x y = if op x y then 1 else 0
+         bToI operator x y = if operator x y then 1 else 0
          iand x y = do
            ix <- ensureInt =<< eval x
            case ix of 
@@ -205,12 +204,12 @@ eval (EApp (Id name) args) = do
     Just (Function params tigState expr) -> do
       when (length params /= length args) (throwError $ "wrong number of arguments: " ++ show (length args) ++ " (expected: " ++ show (length params) ++ ")")
       sandbox $ do
-        env <- readVar tigState
-        newenv <- foldM (\env (name, ex) -> do
+        oldenv <- readVar tigState
+        newenv <- foldM (\env (argName, ex) -> do
           val <- eval ex
           newVar <- lift $ newMutVar val
-          return $ env { varmap = Map.insert name newVar (varmap env) }
-         ) env (zip params args)
+          return $ env { varmap = Map.insert argName newVar (varmap env) }
+         ) oldenv (zip params args)
         put newenv
         eval expr
     Just (FunNative argc body) -> do
@@ -221,9 +220,9 @@ eval (ESeq ls) = do
   results <- forM ls eval
   return $ last (VNone : results)
 eval (ERec {}) = throwError "TODO: record"
-eval (EArr _typeid length initial) = do { -- ignores type-id and creates generic array. type is not checked in this interpreter.
+eval (EArr _typeid lenExp initial) = do { -- ignores type-id and creates generic array. type is not checked in this interpreter.
   initVal <- eval initial;
-  lenVal  <- liftM fromIntegral $ ensureInt =<< eval length;
+  lenVal  <- liftM fromIntegral $ ensureInt =<< eval lenExp;
   ary <- liftM (listArray (0,lenVal-1)) $ replicateM lenVal (lift (newMutVar initVal));
   return $ VArr ary;
 }
@@ -290,15 +289,15 @@ addDecs decs = do
 -- | The original variable environment is modified, but function environment is NOT modified. 
 addDec :: (PrimMonad m, Monad m) => VarRef m (TigState r m) -> Dec -> TigressT r m ()
 addDec _newTigState (DType _) = return ()
-addDec _newTigState (DVar (VarDec (Id id) ty expr)) = do
+addDec _newTigState (DVar (VarDec (Id name) _ty expr)) = do
   var <- newVariable
   val <- eval expr
   updateVar var val
   vm <- liftM varmap get
-  let newvm = Map.insert id var vm
+  let newvm = Map.insert name var vm
   modify $ \s -> s { varmap = newvm }
   return ()
-addDec newTigState (DFun (FunDec (Id name) params ty expr)) = do
+addDec newTigState (DFun (FunDec (Id name) params _ty expr)) = do
     let fct = Function (map ( \(TypeField (Id x) _) -> x) params) newTigState expr
     fm <- liftM funcmap $ lift (readMutVar newTigState)
     let newfm = Map.insert name fct fm
@@ -332,3 +331,4 @@ nativeNot :: (PrimMonad m, Monad m) => [Value m] -> TigressT r m (Value m)
 nativeNot [val] = do
   ival <- ensureInt val
   return $ VInt $ if ival == 0 then 1 else 0
+nativeNot _ = undefined

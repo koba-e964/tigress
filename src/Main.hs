@@ -2,7 +2,6 @@
  Reference : http://www.cs.columbia.edu/~sedwards/classes/2002/w4115/tiger.pdf -}
 module Main where
 
-import TigressToken
 import TigressLexer as TL
 import TigressParser as TP
 import TigressEval as TE
