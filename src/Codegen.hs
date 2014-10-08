@@ -1,11 +1,7 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Codegen where
 
-import TigressExpr
-
 import Data.Word
-import Data.String
 import Data.List
 import Data.Function
 import qualified Data.Map as Map
@@ -18,7 +14,6 @@ import qualified LLVM.General.AST as AST
 import qualified LLVM.General.AST.Attribute as A
 import qualified LLVM.General.AST.CallingConvention as CC
 import qualified LLVM.General.AST.Constant as C
-import qualified LLVM.General.AST.FloatingPointPredicate as FP
 import qualified LLVM.General.AST.IntegerPredicate as IP
 
 {- Reference: https://github.com/sdiehl/kaleidoscope -}
@@ -31,7 +26,7 @@ newtype LLVM a = LLVM { unLLVM :: State AST.Module a }
   deriving (Functor, Applicative, Monad, MonadState AST.Module )
 
 runLLVM :: AST.Module -> LLVM a -> AST.Module
-runLLVM mod llvm = execState (unLLVM llvm) mod
+runLLVM astmod llvm = execState (unLLVM llvm) astmod
 
 emptyModule :: String -> AST.Module
 emptyModule label = defaultModule { moduleName = label }
@@ -90,9 +85,6 @@ uniqueName nm ns =
   case Map.lookup nm ns of
     Nothing -> (nm,  Map.insert nm 1 ns)
     Just ix -> (nm ++ show ix, Map.insert nm (ix+1) ns)
-
-instance IsString Name where
-  fromString = Name . fromString
 
 -------------------------------------------------------------------------------
 -- Codegen State
@@ -190,10 +182,9 @@ addBlock bname = do
                    }
   return (Name qname)
 
-setBlock :: Name -> Codegen Name
+setBlock :: Name -> Codegen ()
 setBlock bname = do
   modify $ \s -> s { currentBlock = bname }
-  return bname
 
 getBlock :: Codegen Name
 getBlock = gets currentBlock

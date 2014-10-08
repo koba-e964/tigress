@@ -4,9 +4,6 @@ import Control.Monad.Except
 import Data.Int
 import qualified LLVM.General.AST as AST
 import LLVM.General.Module as Mod
-import LLVM.General.PassManager
-import LLVM.General.Transforms
-import LLVM.General.Analysis
 import qualified LLVM.General.ExecutionEngine as EE
 import System.Timeout (timeout)
 import qualified Test.Framework as TF
@@ -19,9 +16,7 @@ import Codegen
 import Emit
 import JIT
 
-import LLVM.General.Target
 import LLVM.General.Context
-import LLVM.General.CodeModel
 
 
 main :: IO ()
@@ -63,7 +58,7 @@ assertEq msg actual expected = do
 
 evalCheck :: String -> String -> Maybe Int64 -> TF.Test
 evalCheck name str expected = TFH.testCase name $ do
-  (newmod, result) <- genModule (exprOfString str)
+  (_newmod, result) <- genModule (exprOfString str)
   assertEq name result expected
 {-
 checkErrorExpr :: String -> String -> TF.Test

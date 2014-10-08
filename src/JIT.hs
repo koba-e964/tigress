@@ -12,20 +12,14 @@
 module JIT where
 
 import Data.Int
-import Data.Word
 import Foreign.Ptr ( FunPtr, castFunPtr )
 
 import Control.Monad.Except
 
-import LLVM.General.Target
 import LLVM.General.Context
-import LLVM.General.CodeModel
 import LLVM.General.Module as Mod
 import qualified LLVM.General.AST as AST
 
-import LLVM.General.PassManager
-import LLVM.General.Transforms
-import LLVM.General.Analysis
 
 import qualified LLVM.General.ExecutionEngine as EE
 
@@ -44,9 +38,9 @@ jit c = EE.withMCJIT c optlevel model ptrelim fastins
 
 -- | Takes a module, executes it, and returns the result.
 runJIT :: AST.Module -> IO (Either String (Maybe Int64))
-runJIT mod = do
+runJIT astmod = do
   withContext $ \context -> do
-    runExceptT $ withModuleFromAST context mod $ \m -> do
+    runExceptT $ withModuleFromAST context astmod $ \m -> do
       jit context $ \executionEngine ->
         -- Execution. Slightly optimized by jit compiler.
         EE.withModuleInEngine executionEngine m $ \ee -> do

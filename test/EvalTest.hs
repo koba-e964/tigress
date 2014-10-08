@@ -1,7 +1,6 @@
 module Main where
 
 import Control.Monad.ST (ST, runST)
-import Control.Monad.Identity (runIdentity)
 import System.Timeout (timeout)
 import qualified Test.Framework as TF
 import qualified Test.Framework.Providers.HUnit as TFH 

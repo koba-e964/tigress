@@ -1,7 +1,5 @@
 module TigressExpr where
 
-import Data.Map (Map)
-
 data Expr = 
   EStr !String -- not used in Tigress. This constructor is prepared for future extension.
   | EInt !Integer

@@ -7,22 +7,15 @@ import LLVM.General.Context
 
 import qualified LLVM.General.AST as AST
 import qualified LLVM.General.AST.Constant as C
-import qualified LLVM.General.AST.Float as F
-import qualified LLVM.General.AST.FloatingPointPredicate as FP
 
-import Data.Word
-import Data.Int
+import Data.Word (Word)
 import Control.Monad.Except
-import Control.Applicative
 import qualified Data.Map as Map
 import qualified LLVM.General.AST.IntegerPredicate as IP
 import LLVM.General.PassManager
-import LLVM.General.Transforms
-import LLVM.General.Analysis
 
 import Codegen
 import TigressExpr
-import JIT
 
 {- Reference: https://github.com/sdiehl/kaleidoscope -}
 
@@ -38,8 +31,8 @@ codegenTopSub expr = do
   define int64 "main" [] blks
   where
     blks = createBlocks $ execCodegen $ do
-      entry <- addBlock entryBlockName
-      _ <- setBlock entry
+      entryBlock <- addBlock entryBlockName
+      _ <- setBlock entryBlock
       cgen expr >>= ret
 
 -------------------------------------------------------------------------------
@@ -77,7 +70,9 @@ binops = Map.fromList [
   ]
 
 cgen :: Expr -> Codegen AST.Operand
+cgen (EStr _) = error "TODO: string-codegen"
 cgen (EInt n) = return $ cons $ C.Int 64 n
+cgen ENil     = error "TODO: nil"
 cgen (ELValue lvalue) = do
   var <- getPtr lvalue
   load var
@@ -94,7 +89,7 @@ cgen (EBin bop e1 e2) = do
 cgen (EAsgn lvalue expr) = do
   ptr <- getPtr lvalue
   val <- cgen expr
-  store ptr val
+  _ <- store ptr val
   return $ cons $ C.Undef AST.VoidType
 cgen (EApp (Id name) args) = do
   valArgs <- mapM cgen args
@@ -108,12 +103,12 @@ cgen (EIf cond expr) = do
   -- branch
   ccond <- cgen cond
   test <- cmp IP.EQ ccond (cons $ C.Int 64 0)
-  cbr test ifexit ifthen -- Branch based on the condition
+  _ <- cbr test ifexit ifthen -- Branch based on the condition
   -- if.then
   ------------------
   setBlock ifthen
-  trval <- cgen expr       -- Generate code for the true branch
-  br ifexit                -- Branch to the merge block
+  _ <- cgen expr       -- Generate code for the true branch. Values are discarded.
+  _ <- br ifexit                -- Branch to the merge block
   -- if.exit
   ------------------
   setBlock ifexit
@@ -126,18 +121,18 @@ cgen (EIfElse cond etr efl) = do
   -- branch
   ccond <- cgen cond
   test <- cmp IP.EQ ccond (cons $ C.Int 64 0)
-  cbr test ifelse ifthen -- Branch based on the condition
+  _ <- cbr test ifelse ifthen -- Branch based on the condition
   -- if.then
   ------------------
   setBlock ifthen
   trval <- cgen etr       -- Generate code for the true branch
-  br ifexit                -- Branch to the merge block
+  _ <- br ifexit                -- Branch to the merge block
   ifthenEnd <- getBlock
   -- if.else
   ------------------
   setBlock ifelse
   flval <- cgen efl       -- Generate code for the true branch
-  br ifexit                -- Branch to the merge block
+  _ <- br ifexit                -- Branch to the merge block
   ifelseEnd <- getBlock
   -- if.exit
   ------------------
@@ -148,16 +143,16 @@ cgen (EWhile cond body) = do
   whileCond  <- addBlock "while.cond"
   whileBegin <- addBlock "while.begin"
   whileExit  <- addBlock "while.exit"
-  br whileCond
+  _ <- br whileCond
   -- while.cond
   setBlock whileCond
   ccond <- cgen cond
   pushLoopExit whileExit
-  cbr ccond whileBegin whileExit
+  _ <- cbr ccond whileBegin whileExit
   -- while.begin
   setBlock whileBegin
   _ <- cgen body
-  br whileCond
+  _ <- br whileCond
   -- while.exit
   setBlock whileExit
   _ <- popLoopExit
@@ -171,21 +166,21 @@ cgen (EFor (Id name) begin end body) = do
   var <- alloca int64
   assign name var
   cbeg <- cgen begin -- 'begin' is evaluated second.
-  store var cbeg
+  _ <- store var cbeg
   pushLoopExit forExit
-  br forCond
+  _ <- br forCond
   -- for.cond
   setBlock forCond
   curVal <- load var
   ccond <- le curVal cend
-  cbr ccond forBegin forExit
+  _ <- cbr ccond forBegin forExit
   -- for.begin
   setBlock forBegin
-  cgen body
+  _ <- cgen body
   curValBody <- load var
   newCurVal <- add curValBody (cons (C.Int 64 1))
-  store var newCurVal
-  br forCond
+  _ <- store var newCurVal
+  _ <- br forCond
   -- for.exit
   setBlock forExit
   _ <- popLoopExit
@@ -199,9 +194,9 @@ cgen EBreak = do
   case lExit of
     Nothing    -> error "break not in loop"
     Just block -> do
-      br breaker
+      _ <- br breaker
       setBlock breaker
-      br block
+      _ <- br block
       setBlock dummy
       return $ cons $ C.Undef AST.VoidType
 
@@ -216,6 +211,9 @@ cgenSeq ls = liftM last $ mapM cgen ls
 -- gets the pointer of lvalue
 getPtr :: LValue -> Codegen AST.Operand
 getPtr (LId (Id name)) = getvar name
+getPtr (LMem {}) = error "TODO: member-lvalue-codegen"
+getPtr (LIdx {}) = error "TODO: index-lvalue-codegen"
+
 
 -- declaration
 declare :: Dec -> Codegen ()
@@ -226,21 +224,21 @@ declare (DVar (VarDec (Id name) _mtypeid expr)) = do
   var <- alloca int64
   assign name var
   val <- cgen expr
-  store var val
+  _ <- store var val
   return ()
 declare _ = return ()
 
 
-declareTop (DFun (FunDec (Id name) typefields typeid body)) =
+declareTop (DFun (FunDec (Id name) typefields _rettypeid body)) =
   define int64 name largs bls
   where
-    largs = map (\(TypeField (Id x) typeid) -> (int64, AST.Name x)) typefields
+    largs = map (\(TypeField (Id x) _typeid) -> (int64, AST.Name x)) typefields
     bls = createBlocks $ execCodegen $ do
-      entry <- addBlock entryBlockName
-      setBlock entry
-      forM typefields $ \(TypeField (Id x) typeid) -> do
+      entryBlock <- addBlock entryBlockName
+      setBlock entryBlock
+      forM_ typefields $ \(TypeField (Id x) _argtypeid) -> do
         var <- alloca int64
-        store var (local (AST.Name x))
+        _ <- store var (local (AST.Name x))
         assign x var
       cgen body >>= ret
   
@@ -256,19 +254,19 @@ liftError = runExceptT >=> either fail return
 -- | Compiles 'fns' in the module 'mod' and returns new module.
 -- | This prints the unoptimized module, but returns the optimized module.
 codegen :: AST.Module -> [Expr] -> IO AST.Module
-codegen mod fns = return newast
+codegen astmod fns = return newast
   where
     modn    = mapM codegenTop fns
-    newast  = runLLVM mod modn
+    newast  = runLLVM astmod modn
 
 -- | Optimizes a module. Optimization level is specified in parameter 'opt'.
 optimize :: AST.Module -> Maybe Word -> IO AST.Module
-optimize mod opt = (either fail return =<<) $
+optimize astmod opt = (either fail return =<<) $
   withContext $ \context -> do
-    runExceptT $ withModuleFromAST context mod $ \m -> do
+    runExceptT $ withModuleFromAST context astmod $ \m -> do
       withPassManager (passes opt) $ \pm -> do
         -- Optimization Pass
-        runPassManager pm m
+        _ <- runPassManager pm m
         moduleAST m
 
 -- | Returns passes whose level is 'opt'.

@@ -6,7 +6,6 @@ import qualified Test.HUnit as TH
 import TigressExpr
 import TigressLexer as TL
 import TigressParser as TP
-import TigressEval as TE
 
 main :: IO ()
 main = TF.defaultMain tests
