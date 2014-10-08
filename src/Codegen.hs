@@ -265,6 +265,21 @@ div a b = instr $ SDiv False a b []
 cmp :: IP.IntegerPredicate -> Operand -> Operand -> Codegen Operand
 cmp cond a b =
   boolToInt64 =<< instr (ICmp cond a b [])
+
+eq :: AST.Operand -> AST.Operand -> Codegen AST.Operand
+neq :: AST.Operand -> AST.Operand -> Codegen AST.Operand
+lt :: AST.Operand -> AST.Operand -> Codegen AST.Operand
+gt :: AST.Operand -> AST.Operand -> Codegen AST.Operand
+le :: AST.Operand -> AST.Operand -> Codegen AST.Operand
+ge :: AST.Operand -> AST.Operand -> Codegen AST.Operand
+
+eq = cmp IP.EQ
+neq = cmp IP.NE
+lt = cmp IP.SLT
+gt = cmp IP.SGT
+le = cmp IP.SLE
+ge = cmp IP.SGE
+
   
 -- | zero-extension from boolean(i1) to int64
 -- | false -> 0, true -> 1

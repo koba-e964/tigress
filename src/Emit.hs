@@ -35,24 +35,6 @@ codegenTopSub expr = do
       _ <- setBlock entryBlock
       cgen expr >>= ret
 
--------------------------------------------------------------------------------
--- Operations
--------------------------------------------------------------------------------
-
-eq :: AST.Operand -> AST.Operand -> Codegen AST.Operand
-neq :: AST.Operand -> AST.Operand -> Codegen AST.Operand
-lt :: AST.Operand -> AST.Operand -> Codegen AST.Operand
-gt :: AST.Operand -> AST.Operand -> Codegen AST.Operand
-le :: AST.Operand -> AST.Operand -> Codegen AST.Operand
-ge :: AST.Operand -> AST.Operand -> Codegen AST.Operand
-
-eq = cmp IP.EQ
-neq = cmp IP.NE
-lt = cmp IP.SLT
-gt = cmp IP.SGT
-le = cmp IP.SLE
-ge = cmp IP.SGE
-
 binops :: Map.Map BinOp (AST.Operand -> AST.Operand -> Codegen AST.Operand)
 binops = Map.fromList [
       (BAdd, add)
@@ -186,7 +168,6 @@ cgen (EFor (Id name) begin end body) = do
   _ <- popLoopExit
   return $ cons $ C.Undef AST.VoidType -- TODO: type error occurs if this value is regarded as int64.
 
--- TODO Not working correctly. The break statement is not correctly compiled into branch instruction.
 cgen EBreak = do
   breaker <- addBlock "breaker"
   dummy   <- addBlock "break.dummy"
