@@ -1,16 +1,18 @@
-{-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving, MultiParamTypeClasses, TypeSynonymInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Codegen where
 
-import Data.Word
-import Data.List
-import Data.Function
+import Data.Word (Word)
+import Data.List (sortBy)
+import Data.Function (on)
 import qualified Data.Map as Map
-import Control.Monad.State
-import Control.Applicative
-import Control.Monad.Except
+import Control.Monad (when)
+import Control.Monad.State (MonadState, StateT, execStateT, gets, modify, runStateT)
+import Control.Applicative (Applicative)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
 
-import LLVM.General.AST
-import LLVM.General.AST.Global
+import LLVM.General.AST (Definition(..), FloatingPointFormat(..), Instruction(..), Name(..), Named(..), Operand(..), Terminator(..), Type(..), defaultModule, moduleDefinitions, moduleName)
+import LLVM.General.AST.Global (BasicBlock(BasicBlock), Parameter(Parameter), basicBlocks, functionDefaults, name, parameters, returnType)
 import qualified LLVM.General.AST as AST
 import qualified LLVM.General.AST.Attribute as A
 import qualified LLVM.General.AST.CallingConvention as CC
@@ -397,7 +399,11 @@ retNone = terminator $ Do $ Ret Nothing []
 
 ----
 withContextT :: (Context -> ExceptT e IO a) -> ExceptT e IO a
-withContextT action = ExceptT $ withContext (runExceptT . action)
+withContextT action = liftIO (withContext (runExceptT . action)) >>= liftEither
+
+liftEither :: MonadError e m => Either e a -> m a
+liftEither (Left e) = throwError e
+liftEither (Right val) = return val
 
 
 

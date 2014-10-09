@@ -18,10 +18,6 @@ import TigressExpr
 
 {- Reference: https://github.com/sdiehl/kaleidoscope -}
 
-liftEither :: MonadError e m => Either e a -> m a
-liftEither (Left e) = throwError e
-liftEither (Right val) = return val
-
 
 codegenTop :: Expr -> LLVM ()
 
