@@ -11,19 +11,18 @@
 
 module JIT where
 
-import Data.Int
+import Control.Monad.Except (ExceptT)
+import Data.Int (Int64)
 import Foreign.Ptr ( FunPtr, castFunPtr )
 
-import Control.Monad.Except
-
-import LLVM.General.Context
-import LLVM.General.Module as Mod
 import qualified LLVM.General.AST as AST
-
-
+import LLVM.General.Context (Context)
 import qualified LLVM.General.ExecutionEngine as EE
+import qualified LLVM.General.Module as Mod
 
 import Codegen (withContextT)
+
+
 
 foreign import ccall "dynamic" haskFun :: FunPtr (IO Int64) -> IO Int64
 
@@ -42,7 +41,7 @@ jit c = EE.withMCJIT c optlevel model ptrelim fastins
 runJIT :: AST.Module -> ExceptT String IO (Maybe Int64)
 runJIT astmod =
   withContextT $ \context ->
-    withModuleFromAST context astmod $ \m ->
+    Mod.withModuleFromAST context astmod $ \m ->
       jit context $ \executionEngine ->
         -- Execution. Slightly optimized by jit compiler.
         EE.withModuleInEngine executionEngine m $ \ee -> do
