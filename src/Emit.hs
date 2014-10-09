@@ -19,6 +19,11 @@ import TigressExpr
 
 {- Reference: https://github.com/sdiehl/kaleidoscope -}
 
+liftEither :: MonadError e m => Either e a -> m a
+liftEither (Left e) = throwError e
+liftEither (Right val) = return val
+
+
 codegenTop :: Expr -> LLVM ()
 
 codegenTop (ELet decs exprs) = do
@@ -28,9 +33,7 @@ codegenTop expr = codegenTopSub expr
 
 codegenTopSub :: Expr -> LLVM ()
 codegenTopSub expr = do
-  define retty "main" [] blks
-  where
-    (retty, codegenState) = runCodegen $ do
+  (retty, codegenState) <- liftEither $ runCodegen $ do
       entryBlock <- addBlock entryBlockName
       _ <- setBlock entryBlock
       (ty, val) <- cgen expr
@@ -38,7 +41,8 @@ codegenTopSub expr = do
         AST.VoidType -> retNone
         _            -> ret val
       return ty
-    blks = createBlocks codegenState
+  let blks = createBlocks codegenState
+  define retty "main" [] blks
 
 binops :: Map.Map BinOp (AST.Operand -> AST.Operand -> Codegen AST.Operand)
 binops = Map.fromList [
@@ -65,9 +69,9 @@ voidValue :: (AST.Type, AST.Operand)
 voidValue = (AST.VoidType, cons $ C.Undef AST.VoidType)
 
 cgen :: Expr -> Codegen (AST.Type, AST.Operand)
-cgen (EStr _) = error "TODO: string-codegen"
+cgen (EStr _) = throwError "TODO: string-codegen"
 cgen (EInt n) = return $ (int64, cons $ C.Int 64 n)
-cgen ENil     = error "TODO: nil"
+cgen ENil     = throwError "TODO: nil"
 cgen (ELValue lvalue) = do
   var <- getPtr lvalue
   val <- load var
@@ -83,7 +87,7 @@ cgen (EBin bop e1 e2) = do
       c2 <- cgen e2 >>= checkType int64
       val <- op c1 c2
       return (int64, val)
-    Nothing -> error "invalid operator"
+    Nothing -> throwError "invalid operator"
 cgen (EAsgn lvalue expr) = do
   ptr <- getPtr lvalue
   val <- cgen expr >>= checkType int64
@@ -93,8 +97,8 @@ cgen (EApp (Id name) args) = do
   valArgs <- mapM (cgen >=> checkType int64) args
   call (externf (AST.Name name)) valArgs
 cgen (ESeq exprs) = cgenSeq exprs
-cgen (ERec {}) = error "TODO: codegen-record"
-cgen (EArr {}) = error "TODO: codegen-array"
+cgen (ERec {}) = throwError "TODO: codegen-record"
+cgen (EArr {}) = throwError "TODO: codegen-array"
 cgen (EIf cond expr) = do
   ifthen <- addBlock "if.then"
   ifexit <- addBlock "if.exit"
@@ -189,7 +193,7 @@ cgen EBreak = do
   dummy   <- addBlock "break.dummy"
   lExit <- popLoopExit
   case lExit of
-    Nothing    -> error "break not in loop"
+    Nothing    -> throwError "break not in loop"
     Just block -> do
       _ <- br breaker
       setBlock breaker
@@ -208,8 +212,8 @@ cgenSeq ls = liftM last $ mapM cgen ls
 -- gets the pointer of lvalue
 getPtr :: LValue -> Codegen AST.Operand
 getPtr (LId (Id name)) = getvar name
-getPtr (LMem {}) = error "TODO: member-lvalue-codegen"
-getPtr (LIdx {}) = error "TODO: index-lvalue-codegen"
+getPtr (LMem {}) = throwError "TODO: member-lvalue-codegen"
+getPtr (LIdx {}) = throwError "TODO: index-lvalue-codegen"
 
 
 -- declaration
@@ -226,11 +230,8 @@ declare (DVar (VarDec (Id name) _mtypeid expr)) = do
 declare _ = return ()
 
 
-declareTop (DFun (FunDec (Id name) typefields _rettypeid body)) =
-  define int64 name largs bls
-  where
-    largs = map (\(TypeField (Id x) _typeid) -> (int64, AST.Name x)) typefields
-    bls = createBlocks $ execCodegen $ do
+declareTop (DFun (FunDec (Id name) typefields _rettypeid body)) = do
+  bls <- liftEither $ fmap createBlocks $ execCodegen $ do
       entryBlock <- addBlock entryBlockName
       setBlock entryBlock
       forM_ typefields $ \(TypeField (Id x) _argtypeid) -> do
@@ -241,6 +242,9 @@ declareTop (DFun (FunDec (Id name) typefields _rettypeid body)) =
       case ty of
         AST.VoidType -> retNone
         _            -> ret val
+  define int64 name largs bls
+  where
+    largs = map (\(TypeField (Id x) _typeid) -> (int64, AST.Name x)) typefields
   
 declareTop _ = return ()
 
@@ -252,16 +256,19 @@ liftError :: ExceptT String IO a -> IO a
 liftError = runExceptT >=> either fail return
 
 -- | Compiles 'fns' in the module 'mod' and returns new module.
--- | This prints the unoptimized module, but returns the optimized module.
-codegen :: AST.Module -> [Expr] -> IO AST.Module
-codegen astmod fns = return newast
+codegen :: AST.Module -> [Expr] -> Either String AST.Module
+codegen astmod fns = newast
   where
     modn    = mapM codegenTop fns
     newast  = runLLVM astmod modn
 
+withContextT :: (Context -> ExceptT e IO a) -> ExceptT e IO a
+withContextT action = ExceptT $ withContext (runExceptT . action)
+
+
 -- | Optimizes a module. Optimization level is specified in parameter 'opt'.
-optimize :: AST.Module -> Maybe Word -> IO AST.Module
-optimize astmod opt = (either fail return =<<) $
+optimize :: AST.Module -> Maybe Word -> ExceptT String IO AST.Module
+optimize astmod opt = ExceptT $
   withContext $ \context -> do
     runExceptT $ withModuleFromAST context astmod $ \m -> do
       withPassManager (passes opt) $ \pm -> do

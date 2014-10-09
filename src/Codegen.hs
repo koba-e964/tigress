@@ -23,11 +23,11 @@ import qualified LLVM.General.AST.IntegerPredicate as IP
 -- Module Level
 -------------------------------------------------------------------------------
 
-newtype LLVM a = LLVM { unLLVM :: State AST.Module a }
-  deriving (Functor, Applicative, Monad, MonadState AST.Module )
+newtype LLVM a = LLVM { unLLVM :: StateT AST.Module (Either String) a }
+  deriving (Functor, Applicative, Monad, MonadState AST.Module, MonadError String)
 
-runLLVM :: AST.Module -> LLVM a -> AST.Module
-runLLVM astmod llvm = execState (unLLVM llvm) astmod
+runLLVM :: AST.Module -> LLVM a -> Either String AST.Module
+runLLVM astmod llvm = execStateT (unLLVM llvm) astmod
 
 emptyModule :: String -> AST.Module
 emptyModule label = defaultModule { moduleName = label }
@@ -115,12 +115,8 @@ data BlockState
 -- Codegen Operations
 -------------------------------------------------------------------------------
 
-newtype Codegen a = Codegen { unCodegen :: State CodegenState a }
-  deriving (Functor, Applicative, Monad, MonadState CodegenState )
-
-instance MonadError String Codegen where
-  throwError = error
-  catchError = undefined
+newtype Codegen a = Codegen { unCodegen :: StateT CodegenState (Either String) a }
+  deriving (Functor, Applicative, Monad, MonadState CodegenState, MonadError String )
 
 sortBlocks :: [(Name, BlockState)] -> [(Name, BlockState)]
 sortBlocks = sortBy (compare `on` (idx . snd))
@@ -143,11 +139,11 @@ emptyBlock i = BlockState i [] Nothing
 emptyCodegen :: CodegenState
 emptyCodegen = CodegenState (Name entryBlockName) Map.empty [] 1 0 Map.empty []
 
-execCodegen :: Codegen a -> CodegenState
-execCodegen m = execState (unCodegen m) emptyCodegen
+execCodegen :: Codegen a -> Either String CodegenState
+execCodegen m = execStateT (unCodegen m) emptyCodegen
 
-runCodegen :: Codegen a -> (a, CodegenState)
-runCodegen m = runState (unCodegen m) emptyCodegen
+runCodegen :: Codegen a -> Either String (a, CodegenState)
+runCodegen m = runStateT (unCodegen m) emptyCodegen
 
 fresh :: Codegen Word
 fresh = do
@@ -155,7 +151,7 @@ fresh = do
   modify $ \s -> s { count = 1 + i }
   return $ i + 1
 
-instr :: Instruction -> Codegen (Operand)
+instr :: Instruction -> Codegen Operand
 instr ins = do
   n <- fresh
   let ref = (UnName n)
@@ -227,7 +223,7 @@ current = do
   blks <- gets blocks
   case Map.lookup c blks of
     Just x -> return x
-    Nothing -> error $ "No such block: " ++ show c
+    Nothing -> throwError $ "No such block: " ++ show c
 
 -------------------------------------------------------------------------------
 -- Symbol Table
@@ -243,7 +239,7 @@ getvar var = do
   syms <- gets symtab
   case lookup var syms of
     Just x  -> return x
-    Nothing -> error $ "Local variable not in scope: " ++ show var
+    Nothing -> throwError $ "Local variable not in scope: " ++ show var
 
 -------------------------------------------------------------------------------
 

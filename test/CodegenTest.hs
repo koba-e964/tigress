@@ -1,6 +1,7 @@
 module Main where
 
 import Control.Monad.Except
+import Data.Either (isLeft)
 import Data.Int
 import qualified LLVM.General.AST as AST
 import LLVM.General.Module as Mod
@@ -16,8 +17,6 @@ import Codegen
 import Emit
 import JIT
 
-import LLVM.General.Context
-
 
 main :: IO ()
 main = TF.defaultMain tests
@@ -32,11 +31,11 @@ exprOfString str =
 
 
 -- | Generates a module, run function "main" and returns its value (if there's any).
-genModule :: Expr -> IO (AST.Module, Maybe Int64)
+genModule :: Expr -> ExceptT String IO (AST.Module, Maybe Int64)
 genModule expr = do
-  newmod <- codegen (emptyModule "genmod_test") [expr]
-  withContext $ \context -> do
-    either fail return =<< (runExceptT $ withModuleFromAST context newmod $ \m -> do
+  newmod <- liftEither $ codegen (emptyModule "genmod_test") [expr]
+  withContextT $ \context -> do
+    withModuleFromAST context newmod $ \m -> do
       jit context $ \executionEngine ->
         -- Execution. Slightly optimized by jit compiler.
         EE.withModuleInEngine executionEngine m $ \ee -> do
@@ -46,7 +45,7 @@ genModule expr = do
               res <- run fn
               return (newmod, Just res)
             Nothing -> return (newmod, Nothing)
-      )
+
 
 -- | Tests two values are equal. Checking will be terminated after 2000 milliseconds.
 assertEq :: (Eq a, Show a) => String -> a -> a -> IO ()
@@ -58,16 +57,13 @@ assertEq msg actual expected = do
 
 evalCheck :: String -> String -> Maybe Int64 -> TF.Test
 evalCheck name str expected = TFH.testCase name $ do
-  (_newmod, result) <- genModule (exprOfString str)
+  (_newmod, result) <- liftError $ genModule (exprOfString str)
   assertEq name result expected
-{-
 checkErrorExpr :: String -> String -> TF.Test
-checkErrorExpr name str = TFH.testCase name $ TH.assertBool "failure expected" $
-  let expr = exprOfString str in
-  case evalPure expr of
-    Right _ -> False
-    Left  _ -> True
--}
+checkErrorExpr name str = TFH.testCase name $ TH.assertBool "failure expected" =<<
+  let expr = exprOfString str in do
+    result <- runExceptT (genModule expr)
+    return $ isLeft result
 tests :: [TF.Test]
 tests = [
   testsAdd
@@ -125,13 +121,13 @@ testsLoop = TF.testGroup "eval_loop" [
   ,evalCheck "eval_while2" "let var i := 1 in while i <= 100 do i := i + i; i end" (Just 128)  
   ,evalCheck "eval_break1" "let var sum := 0 in for i := 0 to 10 do (sum := sum + i; if i >= 4 then break); sum end" (Just 10)
   ,evalCheck "eval_break2" "let var i := 1 in while 1 do (i := i + i; if i >= 100 then break); i end" (Just 128)
---  ,checkErrorExpr "eval_break3" "(for i := 0 to 10 do (i;());break)"
+  ,checkErrorExpr "eval_break3" "(for i := 0 to 10 do (i;());break)"
  ]
 
 testsArray :: TF.Test
 testsArray = TF.testGroup "eval_array" [
   evalCheck "eval_array1" "let type intArray = array of int var ary := new intArray [8] of 0 in ary[3] end" (Just 0)
   ,evalCheck "eval_array2" "let type ints = array of int var ary := new ints[100] of 0 in for i := 0 to 99 do (ary[i] := i); ary[53] end" (Just 53)
---  ,checkErrorExpr "eval_array3" "let type ints = array of int var ary := new ints[100] of 0 in ary[100] end"
+  ,checkErrorExpr "eval_array3" "let type ints = array of int var ary := new ints[100] of 0 in ary[100] end"
  ]
 

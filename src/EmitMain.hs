@@ -1,7 +1,6 @@
 module Main where
 
 import LLVM.General.Module
-import LLVM.General.Context
 
 import Data.List (foldl')
 import Control.Monad.Except
@@ -52,19 +51,19 @@ repl = do
     let exprOrErr = TP.tparse toks
     case exprOrErr of
        Left err -> void $ print err
-       Right expr -> do
-         print expr
-         newmod <- codegen (emptyModule "JITtest") [expr]
+       Right expr -> liftError $ do
+         liftIO $ print expr
+         newmod <- liftEither $ codegen (emptyModule "JITtest") [expr]
          optmod <- optimize newmod (Just 3)
-         _ <- withContext $ \ctx -> do
-           _ <- runExceptT $ withModuleFromAST ctx newmod $ \mm -> do
-             putStrLn "***** Module before optimization *****"
-             s <- moduleLLVMAssembly mm
-             putStrLn s
-           runExceptT $ withModuleFromAST ctx optmod $ \mm -> do
-             putStrLn "***** Optimized Module *****"
-             s <- moduleLLVMAssembly mm
-             putStrLn s
-         runJIT optmod >>= either fail (\x -> putStrLn ("result = " ++ show x))
-         repl
+         _ <- withContextT $ \ctx -> do
+           _ <- withModuleFromAST ctx newmod $ \mm -> do
+             liftIO $ putStrLn "***** Module before optimization *****"
+             s <- liftIO $ moduleLLVMAssembly mm
+             liftIO $ putStrLn s
+           withModuleFromAST ctx optmod $ \mm -> do
+             liftIO $ putStrLn "***** Optimized Module *****"
+             s <- liftIO $ moduleLLVMAssembly mm
+             liftIO $ putStrLn s
+         liftIO $ runJIT optmod >>= either fail (\x -> putStrLn ("result = " ++ show x))
+         liftIO repl
 
