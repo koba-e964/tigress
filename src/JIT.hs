@@ -23,6 +23,8 @@ import qualified LLVM.General.AST as AST
 
 import qualified LLVM.General.ExecutionEngine as EE
 
+import Codegen (withContextT)
+
 foreign import ccall "dynamic" haskFun :: FunPtr (IO Int64) -> IO Int64
 
 run :: FunPtr a -> IO Int64
@@ -37,10 +39,10 @@ jit c = EE.withMCJIT c optlevel model ptrelim fastins
     fastins  = Nothing -- fast instruction selection
 
 -- | Takes a module, executes it, and returns the result.
-runJIT :: AST.Module -> IO (Either String (Maybe Int64))
-runJIT astmod = do
-  withContext $ \context -> do
-    runExceptT $ withModuleFromAST context astmod $ \m -> do
+runJIT :: AST.Module -> ExceptT String IO (Maybe Int64)
+runJIT astmod =
+  withContextT $ \context ->
+    withModuleFromAST context astmod $ \m ->
       jit context $ \executionEngine ->
         -- Execution. Slightly optimized by jit compiler.
         EE.withModuleInEngine executionEngine m $ \ee -> do

@@ -3,7 +3,6 @@
 module Emit where
 
 import LLVM.General.Module
-import LLVM.General.Context
 
 import qualified LLVM.General.AST as AST
 import qualified LLVM.General.AST.Constant as C
@@ -60,7 +59,7 @@ binops = Map.fromList [
 
 cgen :: Expr -> Codegen TypedOperand
 cgen (EStr _) = throwError "TODO: string-codegen"
-cgen (EInt n) = return $ (int64, cons $ C.Int 64 n)
+cgen (EInt n) = return (int64, cons $ C.Int 64 n)
 cgen ENil     = throwError "TODO: nil"
 cgen (ELValue lvalue) = do
   var <- getPtr lvalue
@@ -70,7 +69,7 @@ cgen (EMinus e) = do
   operand <- checkType int64 =<< cgen e
   val <- sub (cons (C.Int 64 0)) operand
   return (int64, val)
-cgen (EBin bop e1 e2) = do
+cgen (EBin bop e1 e2) =
   case bop of
     BAnd -> sand (cgen e1) (cgen e2)
     BOr  -> sor  (cgen e1) (cgen e2)
@@ -232,15 +231,12 @@ codegen astmod fns = newast
     modn    = mapM codegenTop fns
     newast  = runLLVM astmod modn
 
-withContextT :: (Context -> ExceptT e IO a) -> ExceptT e IO a
-withContextT action = ExceptT $ withContext (runExceptT . action)
-
 
 -- | Optimizes a module. Optimization level is specified in parameter 'opt'.
 optimize :: AST.Module -> Maybe Word -> ExceptT String IO AST.Module
-optimize astmod opt = ExceptT $
-  withContext $ \context -> do
-    runExceptT $ withModuleFromAST context astmod $ \m -> do
+optimize astmod opt =
+  withContextT $ \context ->
+    withModuleFromAST context astmod $ \m ->
       withPassManager (passes opt) $ \pm -> do
         -- Optimization Pass
         _ <- runPassManager pm m

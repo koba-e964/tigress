@@ -34,8 +34,8 @@ exprOfString str =
 genModule :: Expr -> ExceptT String IO (AST.Module, Maybe Int64)
 genModule expr = do
   newmod <- liftEither $ codegen (emptyModule "genmod_test") [expr]
-  withContextT $ \context -> do
-    withModuleFromAST context newmod $ \m -> do
+  withContextT $ \context ->
+    withModuleFromAST context newmod $ \m ->
       jit context $ \executionEngine ->
         -- Execution. Slightly optimized by jit compiler.
         EE.withModuleInEngine executionEngine m $ \ee -> do

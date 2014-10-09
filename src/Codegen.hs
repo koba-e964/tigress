@@ -16,6 +16,7 @@ import qualified LLVM.General.AST.Attribute as A
 import qualified LLVM.General.AST.CallingConvention as CC
 import qualified LLVM.General.AST.Constant as C
 import qualified LLVM.General.AST.IntegerPredicate as IP
+import LLVM.General.Context (Context, withContext)
 
 {- Reference: https://github.com/sdiehl/kaleidoscope -}
 
@@ -125,10 +126,10 @@ createBlocks :: CodegenState -> [BasicBlock]
 createBlocks m = map makeBlock $ sortBlocks $ Map.toList (blocks m)
 
 makeBlock :: (Name, BlockState) -> BasicBlock
-makeBlock (l, (BlockState _ s t)) = BasicBlock l s (maketerm t)
+makeBlock (l, BlockState _ s t) = BasicBlock l s (maketerm t)
   where
     maketerm (Just x) = x
-    maketerm Nothing = error $ "Block has no terminator: " ++ (show l)
+    maketerm Nothing = error $ "Block has no terminator: " ++ show l
 
 entryBlockName :: String
 entryBlockName = "entry"
@@ -154,7 +155,7 @@ fresh = do
 instr :: Instruction -> Codegen Operand
 instr ins = do
   n <- fresh
-  let ref = (UnName n)
+  let ref = UnName n
   blk <- current
   let i = stack blk
   modifyBlock (blk { stack = i ++ [ref := ins] } )
@@ -187,21 +188,21 @@ addBlock bname = do
   return (Name qname)
 
 setBlock :: Name -> Codegen ()
-setBlock bname = do
+setBlock bname =
   modify $ \s -> s { currentBlock = bname }
 
 getBlock :: Codegen Name
 getBlock = gets currentBlock
 
 setLoopExits :: [Name] -> Codegen ()
-setLoopExits bname = do
+setLoopExits bname =
   modify $ \s -> s { loopExits = bname }
 
 getLoopExits :: Codegen [Name]
 getLoopExits = gets loopExits
 
 pushLoopExit :: Name -> Codegen ()
-pushLoopExit bname = do
+pushLoopExit bname =
    modify $ \s -> s { loopExits = bname : loopExits s }
 
 popLoopExit :: Codegen (Maybe Name)
@@ -232,7 +233,7 @@ current = do
 assign :: String -> Operand -> Codegen ()
 assign var x = do
   lcls <- gets symtab
-  modify $ \s -> s { symtab = [(var, x)] ++ lcls }
+  modify $ \s -> s { symtab = (var, x) : lcls }
 
 getvar :: String -> Codegen Operand
 getvar var = do
@@ -392,5 +393,11 @@ ret val = terminator $ Do $ Ret (Just val) []
 
 retNone :: Codegen (Named Terminator)
 retNone = terminator $ Do $ Ret Nothing []
+
+
+----
+withContextT :: (Context -> ExceptT e IO a) -> ExceptT e IO a
+withContextT action = ExceptT $ withContext (runExceptT . action)
+
 
 

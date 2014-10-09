@@ -27,9 +27,9 @@ defaultConf = Config
 
 options :: [OptDescr (Config -> Config)]
 options =
-    [ Option ['o'] ["output"]
+    [ Option "o" ["output"]
         (ReqArg (\s conf -> conf { outFile = Just s }) "OUTFILE") "output file name"
-    , Option ['h','?'] ["help"]
+    , Option "h?" ["help"]
         (NoArg (\conf -> conf { helpMode = True })) "verbose mode"
     ]
 
@@ -37,7 +37,7 @@ main :: IO ()
 main = do
   args <- getArgs
   let (ops, rest, err) = getOpt Permute options args
-  when (not (null err)) $ error $ "err:" ++ show err 
+  unless (null err) $ error $ "err:" ++ show err 
   let _conf = foldl' (.) id ops defaultConf -- currently not used
   case rest of
     [] -> repl
@@ -64,6 +64,7 @@ repl = do
              liftIO $ putStrLn "***** Optimized Module *****"
              s <- liftIO $ moduleLLVMAssembly mm
              liftIO $ putStrLn s
-         liftIO $ runJIT optmod >>= either fail (\x -> putStrLn ("result = " ++ show x))
+         result <- runJIT optmod
+         liftIO $ putStrLn ("result = " ++ show result)
          liftIO repl
 
