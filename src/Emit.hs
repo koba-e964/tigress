@@ -2,16 +2,17 @@
 
 module Emit where
 
-import LLVM.General.Module
+import LLVM.General.Module (moduleAST, withModuleFromAST)
 
 import qualified LLVM.General.AST as AST
 import qualified LLVM.General.AST.Constant as C
 
 import Data.Word (Word)
-import Control.Monad.Except
+import Control.Monad ((>=>), forM_, liftM,)
+import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import qualified Data.Map as Map
 import qualified LLVM.General.AST.IntegerPredicate as IP
-import LLVM.General.PassManager
+import LLVM.General.PassManager (PassSetSpec, defaultCuratedPassSetSpec, optLevel, runPassManager, withPassManager)
 
 import Codegen
 import TigressExpr
