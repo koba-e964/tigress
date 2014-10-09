@@ -241,7 +241,21 @@ getvar var = do
     Just x  -> return x
     Nothing -> throwError $ "Local variable not in scope: " ++ show var
 
+
 -------------------------------------------------------------------------------
+--- Types
+-------------------------------------------------------------------------------
+
+type TypedOperand = (AST.Type, AST.Operand)
+
+checkType :: AST.Type -> TypedOperand -> Codegen AST.Operand
+checkType ty (realTy, realVal) = do
+  when (ty /= realTy) (throwError $ "Type error (expected: " ++ show ty ++ ", actual: " ++ show realTy ++ ")")
+  return realVal
+
+voidValue :: TypedOperand
+voidValue = (AST.VoidType, cons $ C.Undef AST.VoidType)
+
 
 -- References
 local ::  Name -> Operand
@@ -284,7 +298,47 @@ gt = cmp IP.SGT
 le = cmp IP.SLE
 ge = cmp IP.SGE
 
-  
+
+conditional :: Codegen TypedOperand -> Codegen TypedOperand -> Codegen TypedOperand -> Codegen TypedOperand
+conditional cond etr efl = do
+  ifthen <- addBlock "if.then"
+  ifelse <- addBlock "if.else"
+  ifexit <- addBlock "if.exit"
+  -- branch
+  ccond <- cond >>= checkType int64
+  test <- cmp IP.EQ ccond (cons $ C.Int 64 0)
+  _ <- cbr test ifelse ifthen -- Branch based on the condition
+  -- if.then
+  ------------------
+  setBlock ifthen
+  trval <- etr       -- Generate code for the true branch
+  _ <- br ifexit                -- Branch to the merge block
+  ifthenEnd <- getBlock
+  -- if.else
+  ------------------
+  setBlock ifelse
+  flval <- efl       -- Generate code for the true branch
+  _ <- br ifexit                -- Branch to the merge block
+  ifelseEnd <- getBlock
+  -- if.exit
+  ------------------
+  setBlock ifexit
+  phi [(trval, ifthenEnd), (flval, ifelseEnd)]
+
+not0 :: TypedOperand -> Codegen TypedOperand
+not0 op = conditional (return op) (return (int64, cons $ C.Int 64 1)) (return (int64, cons $ C.Int 64 0))
+
+sand :: Codegen TypedOperand -> Codegen TypedOperand -> Codegen TypedOperand -- shortcut and
+sor  :: Codegen TypedOperand -> Codegen TypedOperand -> Codegen TypedOperand  -- shortcut or
+
+sand a b =
+  conditional a (b >>= not0) (return (int64, cons $ C.Int 64 0))
+    
+sor a b = 
+  conditional a (return (int64, cons $ C.Int 64 1)) (b >>= not0)
+
+
+
 -- | zero-extension from boolean(i1) to int64
 -- | false -> 0, true -> 1
 boolToInt64 :: Operand -> Codegen Operand

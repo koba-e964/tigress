@@ -56,19 +56,9 @@ binops = Map.fromList [
     , (BGt, gt)
     , (BLe, le)
     , (BGe, ge)
-    , (BAnd, undefined)
-    , (BOr, undefined)
   ]
 
-checkType :: AST.Type -> (AST.Type, AST.Operand) -> Codegen AST.Operand
-checkType ty (realTy, realVal) = do
-  when (ty /= realTy) (throwError $ "Type error (expected: " ++ show ty ++ ", actual: " ++ show realTy ++ ")")
-  return realVal
-
-voidValue :: (AST.Type, AST.Operand)
-voidValue = (AST.VoidType, cons $ C.Undef AST.VoidType)
-
-cgen :: Expr -> Codegen (AST.Type, AST.Operand)
+cgen :: Expr -> Codegen TypedOperand
 cgen (EStr _) = throwError "TODO: string-codegen"
 cgen (EInt n) = return $ (int64, cons $ C.Int 64 n)
 cgen ENil     = throwError "TODO: nil"
@@ -81,13 +71,17 @@ cgen (EMinus e) = do
   val <- sub (cons (C.Int 64 0)) operand
   return (int64, val)
 cgen (EBin bop e1 e2) = do
-  case Map.lookup bop binops of
-    Just op -> do
-      c1 <- cgen e1 >>= checkType int64
-      c2 <- cgen e2 >>= checkType int64
-      val <- op c1 c2
-      return (int64, val)
-    Nothing -> throwError "invalid operator"
+  case bop of
+    BAnd -> sand (cgen e1) (cgen e2)
+    BOr  -> sor  (cgen e1) (cgen e2)
+    _    ->
+      case Map.lookup bop binops of
+        Just op -> do
+          c1 <- cgen e1 >>= checkType int64
+          c2 <- cgen e2 >>= checkType int64
+          val <- op c1 c2
+          return (int64, val)
+        Nothing -> throwError "invalid operator"
 cgen (EAsgn lvalue expr) = do
   ptr <- getPtr lvalue
   val <- cgen expr >>= checkType int64
@@ -116,31 +110,7 @@ cgen (EIf cond expr) = do
   setBlock ifexit
   return voidValue
 
-cgen (EIfElse cond etr efl) = do
-  ifthen <- addBlock "if.then"
-  ifelse <- addBlock "if.else"
-  ifexit <- addBlock "if.exit"
-  -- branch
-  ccond <- cgen cond >>= checkType int64
-  test <- cmp IP.EQ ccond (cons $ C.Int 64 0)
-  _ <- cbr test ifelse ifthen -- Branch based on the condition
-  -- if.then
-  ------------------
-  setBlock ifthen
-  trval <- cgen etr       -- Generate code for the true branch
-  _ <- br ifexit                -- Branch to the merge block
-  ifthenEnd <- getBlock
-  -- if.else
-  ------------------
-  setBlock ifelse
-  flval <- cgen efl       -- Generate code for the true branch
-  _ <- br ifexit                -- Branch to the merge block
-  ifelseEnd <- getBlock
-  -- if.exit
-  ------------------
-  setBlock ifexit
-  phi [(trval, ifthenEnd), (flval, ifelseEnd)]
-
+cgen (EIfElse cond etr efl) = conditional (cgen cond) (cgen etr) (cgen efl)
 cgen (EWhile cond body) = do
   whileCond  <- addBlock "while.cond"
   whileBegin <- addBlock "while.begin"
@@ -205,7 +175,7 @@ cgen (ELet decs exprs) = do
   mapM_ declare decs
   cgenSeq exprs
 
-cgenSeq :: [Expr] -> Codegen (AST.Type, AST.Operand)
+cgenSeq :: [Expr] -> Codegen TypedOperand
 cgenSeq [] = return voidValue
 cgenSeq ls = liftM last $ mapM cgen ls
 
