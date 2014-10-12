@@ -1,7 +1,6 @@
 module Main where
 
 import Control.Monad.Except
-import Data.Either (isLeft)
 import Data.Int
 import qualified LLVM.General.AST as AST
 import LLVM.General.Module as Mod
@@ -63,7 +62,10 @@ checkErrorExpr :: String -> String -> TF.Test
 checkErrorExpr name str = TFH.testCase name $ TH.assertBool "failure expected" =<<
   let expr = exprOfString str in do
     result <- runExceptT (genModule expr)
-    return $ isLeft result
+    return $ isL result
+   where
+    isL (Left _) = True
+    isL _        = False
 tests :: [TF.Test]
 tests = [
   testsAdd
