@@ -61,6 +61,17 @@ NEW {NEW}
 ID {ID $$}
 INT {INT $$}
 
+%nonassoc prec_ifdangling_noelse
+%nonassoc ELSE
+%nonassoc prec_single_if
+%nonassoc ":="
+%left "|"
+%left "&"
+%nonassoc "=" "<>" "<" ">" "<=" ">="
+%left "+" "-"
+%left "*" "/"
+%right UNARY_MINUS
+
 %%
 {-
 
@@ -81,7 +92,7 @@ expr:
 ;
 
 if_expr_not_dangling:
-  oexpr0  { $1 }
+  oexpr1 %prec prec_single_if { $1 }
 | if_then_not_dangling ELSE if_expr_not_dangling { case $1 of (x,y) -> EIfElse x y $3 }
 | WHILE expr DO if_expr_not_dangling { EWhile $2 $4 }
 | FOR id ":=" expr TO expr DO if_expr_not_dangling { EFor $2 $4 $6 $8 }
@@ -89,7 +100,8 @@ if_expr_not_dangling:
 
 if_expr_dangling:
   if_then_dangling { $1 }
-| if_then_not_dangling { case $1 of (x,y) -> EIf x y }
+| if_then_not_dangling
+   %prec prec_ifdangling_noelse { case $1 of (x,y) -> EIf x y }
 | if_then_not_dangling ELSE if_expr_dangling { case $1 of (x,y) -> EIfElse x y $3 }
 | WHILE expr DO if_expr_dangling { EWhile $2 $4 }
 | FOR id ":=" expr TO expr DO if_expr_dangling { EFor $2 $4 $6 $8 }
@@ -104,46 +116,22 @@ if_then_dangling:
 ;
 
 
-oexpr0: -- ":="
-  oexpr1             { $1 }
-| lvalue ":=" oexpr1 {EAsgn $1 $3 }
-;
-
 oexpr1: -- "|"
-  oexpr2  { $1 }
-| oexpr1 "|" oexpr2 { EBin BOr $1 $3 }
-;
-
-oexpr2: -- "&"
-  oexpr3  { $1 }
-| oexpr2 "&" oexpr3 { EBin BAnd $1 $3 }
-;
-
-oexpr3: -- comparison
-  oexpr4  { $1 }
-| oexpr4 "=" oexpr4 { EBin BEq $1 $3 }
-| oexpr4 "<>" oexpr4 { EBin BNeq $1 $3 }
-| oexpr4 ">" oexpr4 { EBin BGt $1 $3 }
-| oexpr4 "<" oexpr4 { EBin BLt $1 $3 }
-| oexpr4 ">=" oexpr4 { EBin BGe $1 $3 }
-| oexpr4 "<=" oexpr4 { EBin BLe $1 $3 }
-;
-
-oexpr4: -- "+" "-"
-  oexpr5  { $1 }
-| oexpr4 "+" oexpr5 { EBin BAdd $1 $3 }
-| oexpr4 "-" oexpr5 { EBin BSub $1 $3 }
-;
-
-oexpr5: -- "*" "/"
-  oexpr6  { $1 }
-| oexpr5 "*" oexpr6 { EBin BMul $1 $3 }
-| oexpr5 "/" oexpr6 { EBin BDiv $1 $3 }
-;
-
-oexpr6: -- unary "-"
-  simpl_expr  { $1 }
-| "-" oexpr6 { EMinus $2 }
+  lvalue ":=" oexpr1 {EAsgn $1 $3 }
+| oexpr1 "|" oexpr1 { EBin BOr $1 $3 }
+| oexpr1 "&" oexpr1 { EBin BAnd $1 $3 }
+| oexpr1 "=" oexpr1 { EBin BEq $1 $3 }
+| oexpr1 "<>" oexpr1 { EBin BNeq $1 $3 }
+| oexpr1 ">" oexpr1 { EBin BGt $1 $3 }
+| oexpr1 "<" oexpr1 { EBin BLt $1 $3 }
+| oexpr1 ">=" oexpr1 { EBin BGe $1 $3 }
+| oexpr1 "<=" oexpr1 { EBin BLe $1 $3 }
+| oexpr1 "+" oexpr1 { EBin BAdd $1 $3 }
+| oexpr1 "-" oexpr1 { EBin BSub $1 $3 }
+| oexpr1 "*" oexpr1 { EBin BMul $1 $3 }
+| oexpr1 "/" oexpr1 { EBin BDiv $1 $3 }
+| simpl_expr  { $1 }
+| "-" simpl_expr %prec UNARY_MINUS { EMinus $2 }
 ;
 
 simpl_expr:
