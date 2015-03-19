@@ -4,13 +4,14 @@ import TigressExpr
 import Control.Monad (when)
 import Control.Monad.State (State, evalState)
 
+-- | Type variable or concrete type.
 data AType
   = CType !Type -- concrete type
   | TVar !String -- type variable
    deriving (Eq, Show)
 
 
-data TypedExpr = 
+data TypedExpr =
   TEStr !String -- not used in Tigress. This constructor is prepared for future extension.
   | TEInt !Integer
   | TENil AType
@@ -59,8 +60,10 @@ getTypedExpr expr = runM $ do
   when (isValidExpr ret) $ fail $ "Type inference failed: " ++ show ret
   return ret
 
-typeOf = undefined
-aTypeOf = undefined
+aTypeOf texpr = case texpr of
+  TEStr _ -> CType strType
+  TEInt _ -> CType intType
+  _       -> undefined
 isValidExpr = undefined
 
 
