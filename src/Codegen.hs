@@ -13,11 +13,13 @@ import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
 
 import LLVM.General.AST (Definition(..), FloatingPointFormat(..), Instruction(..), Name(..), Named(..), Operand(..), Terminator(..), Type(..), defaultModule, moduleDefinitions, moduleName)
 import LLVM.General.AST.Global (BasicBlock(BasicBlock), Parameter(Parameter), basicBlocks, functionDefaults, name, parameters, returnType)
+import qualified LLVM.General.AST.Global as G
 import qualified LLVM.General.AST as AST
 import qualified LLVM.General.AST.Attribute as A
 import qualified LLVM.General.AST.CallingConvention as CC
 import qualified LLVM.General.AST.Constant as C
 import qualified LLVM.General.AST.IntegerPredicate as IP
+import qualified LLVM.General.AST.Linkage as Linkage
 import LLVM.General.Context (Context, withContext)
 
 {- Reference: https://github.com/sdiehl/kaleidoscope -}
@@ -44,9 +46,11 @@ define ::  AST.Type -> String -> [(AST.Type, Name)] -> [BasicBlock] -> LLVM ()
 define retty label argtys body = addDefn $
   GlobalDefinition $ functionDefaults {
     name        = Name label
+  , G.linkage   = if label == "main" then Linkage.External else Linkage.Private
   , parameters  = ([Parameter ty nm [] | (ty, nm) <- argtys], False)
   , returnType  = retty
   , basicBlocks = body
+  , G.functionAttributes = [A.InlineHint]
   }
 
 external ::  AST.Type -> String -> [(AST.Type, Name)] -> LLVM ()

@@ -12,7 +12,7 @@ import Control.Monad ((>=>), forM_, liftM,)
 import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import qualified Data.Map as Map
 import qualified LLVM.General.AST.IntegerPredicate as IP
-import LLVM.General.PassManager (PassSetSpec, defaultCuratedPassSetSpec, optLevel, runPassManager, withPassManager)
+import LLVM.General.PassManager (PassSetSpec, defaultCuratedPassSetSpec, optLevel, runPassManager, useInlinerWithThreshold, withPassManager)
 
 import Codegen
 import TigressExpr
@@ -241,6 +241,6 @@ optimize astmod opt =
 
 -- | Returns passes whose level is 'opt'.
 passes :: Maybe Word -> PassSetSpec
-passes opt = defaultCuratedPassSetSpec { optLevel = opt }
+passes opt = defaultCuratedPassSetSpec { optLevel = opt, useInlinerWithThreshold = Just 10 }
 
 
