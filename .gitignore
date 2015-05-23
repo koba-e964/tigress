@@ -7,4 +7,5 @@ mtigress
 dist/
 .cabal-sandbox/
 cabal.sandbox.config
-
+*.ll
+*.s
