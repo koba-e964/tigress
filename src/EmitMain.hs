@@ -4,6 +4,7 @@ import LLVM.General.Module
 
 import Data.List (foldl')
 import Control.Monad.Except
+import Control.Monad.State (StateT, evalStateT, runStateT)
 import System.IO
 import System.Environment (getArgs)
 import System.Console.GetOpt
@@ -13,6 +14,8 @@ import Emit
 import JIT
 import TigressLexer as TL
 import TigressParser as TP
+import TigressExpr (Expr)
+
 
 data Config = Config
   { outFile :: Maybe FilePath
@@ -38,33 +41,42 @@ main = do
   args <- getArgs
   let (ops, rest, err) = getOpt Permute options args
   unless (null err) $ error $ "err:" ++ show err 
-  let _conf = foldl' (.) id ops defaultConf -- currently not used
+  let conf = foldl' (.) id ops defaultConf -- currently not used
   case rest of
-    [] -> repl
+    [] -> evalStateT repl conf
     (_name : _) -> error "TODO:source file"
-repl :: IO ()
+repl :: StateT Config IO ()
 repl = do
-    hSetBuffering stdout NoBuffering
-    putStr "> "
-    line <- getLine
+    liftIO $ hSetBuffering stdout NoBuffering
+    liftIO $ putStr "> "
+    line <- liftIO $ getLine
     let toks = TL.alexScanTokens line
     let exprOrErr = TP.tparse toks
     case exprOrErr of
-       Left err -> void $ print err
-       Right expr -> liftError $ do
+      Left err -> liftIO (print err)
+      Right expr -> do
+        liftIO $ do
+          x <- runExceptT $ interpretExpr expr
+          case x of
+            Left err -> hPutStrLn stderr err
+            Right _ -> return ()
+    repl
+  where
+    -- compiles expr and displays the LLVM code and the result.
+    interpretExpr :: Expr -> ExceptT String IO ()
+    interpretExpr expr = do
          liftIO $ print expr
          newmod <- liftEither $ codegen (emptyModule "JITtest") [expr]
          optmod <- optimize newmod (Just 3)
-         _ <- withContextT $ \ctx -> do
-           _ <- withModuleFromAST ctx newmod $ \mm -> do
-             liftIO $ putStrLn "***** Module before optimization *****"
-             s <- liftIO $ moduleLLVMAssembly mm
-             liftIO $ putStrLn s
+         withContextT $ \ctx -> do
+           withModuleFromAST ctx newmod $ \mm -> do
+             putStrLn "***** Module before optimization *****"
+             s <- moduleLLVMAssembly mm
+             putStrLn s
            withModuleFromAST ctx optmod $ \mm -> do
-             liftIO $ putStrLn "***** Optimized Module *****"
-             s <- liftIO $ moduleLLVMAssembly mm
-             liftIO $ putStrLn s
+             putStrLn "***** Optimized Module *****"
+             s <- moduleLLVMAssembly mm
+             putStrLn s
          result <- runJIT optmod
          liftIO $ putStrLn ("result = " ++ show result)
-         liftIO repl
 
