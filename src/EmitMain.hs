@@ -4,7 +4,6 @@ import LLVM.General.Module
 
 import Data.List (foldl')
 import Control.Monad.Except
-import Control.Monad.State (StateT, evalStateT)
 import System.IO
 import System.Environment (getArgs)
 import System.Console.GetOpt
@@ -48,10 +47,16 @@ main = do
         Nothing -> repl
         Just path -> do
           handle <- openFile path WriteMode
-          line <- getLine
+          line <- getContents
           liftError $ interpretString line handle False
           hClose handle
-    (_name : _) -> error "TODO:source file"
+    (name : _) -> do
+      let operate handle = withFile name ReadMode $ \hIn -> do
+            cont <- hGetContents hIn
+            liftError $ interpretString cont handle False
+      case outFile conf of
+        Nothing -> operate stdout
+        Just path -> withFile path WriteMode operate
 repl :: IO ()
 repl = do
     liftIO $ hSetBuffering stdout NoBuffering

@@ -1,0 +1,10 @@
+let
+  var x := 4
+  var y := 5
+  var z := x + y
+  function f(a : int, b : int) =
+    a + b + 9
+  in
+    f(x, y) + f(y, x)
+end
+
