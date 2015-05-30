@@ -281,11 +281,25 @@ add a b = instr $ Add False False a b []
 sub :: Operand -> Operand -> Codegen Operand
 sub a b = instr $ Sub False False a b []
 
+-- negation (i.e. -a)
+neg :: Operand -> Codegen Operand
+neg a = sub (cons (C.Int 64 0)) a
+
 mul :: Operand -> Operand -> Codegen Operand
 mul a b = instr $ Mul False False a b []
 
 div :: Operand -> Operand -> Codegen Operand
-div a b = instr $ SDiv False a b []
+div a b = do
+  ccond <- gt a (cons $ C.Int 64 0)
+  let onPos = do
+        res <-instr $ SDiv False a b []
+        return (int64, res)
+  let onNeg = do
+        bm1 <- sub b (cons (C.Int 64 1))
+        ceil <- sub a bm1 -- a - b + 1
+        res <- instr $ SDiv False ceil b []
+        return (int64, res) -- (a - b + 1) / b is floor(a / b)
+  conditional (return (int64, ccond)) onPos onNeg >>= checkType int64
 
 cmp :: IP.IntegerPredicate -> Operand -> Operand -> Codegen Operand
 cmp cond a b =
@@ -315,6 +329,32 @@ conditional cond etr efl = do
   ccond <- cond >>= checkType int64
   test <- cmp IP.EQ ccond (cons $ C.Int 64 0)
   _ <- cbr test ifelse ifthen -- Branch based on the condition
+  -- if.then
+  ------------------
+  setBlock ifthen
+  trval <- etr       -- Generate code for the true branch
+  _ <- br ifexit                -- Branch to the merge block
+  ifthenEnd <- getBlock
+  -- if.else
+  ------------------
+  setBlock ifelse
+  flval <- efl       -- Generate code for the true branch
+  _ <- br ifexit                -- Branch to the merge block
+  ifelseEnd <- getBlock
+  -- if.exit
+  ------------------
+  setBlock ifexit
+  phi [(trval, ifthenEnd), (flval, ifelseEnd)]
+
+-- | cond must be of type i1.
+conditionalBool :: Codegen TypedOperand -> Codegen TypedOperand -> Codegen TypedOperand -> Codegen TypedOperand
+conditionalBool cond etr efl = do
+  ifthen <- addBlock "if.then"
+  ifelse <- addBlock "if.else"
+  ifexit <- addBlock "if.exit"
+  -- branch
+  ccond <- cond >>= checkType int1
+  _ <- cbr ccond ifelse ifthen -- Branch based on the condition
   -- if.then
   ------------------
   setBlock ifthen
