@@ -2,6 +2,7 @@ module Main where
 
 import LLVM.General.Module
 
+import Data.Word (Word)
 import Data.List (foldl')
 import Control.Monad.Except
 import System.IO
@@ -19,6 +20,7 @@ import TigressExpr (Expr)
 data Config = Config
   { outFile :: Maybe FilePath
   , helpMode :: Bool
+  , optLevel :: Word
   } deriving Show
 
 defaultConf :: Config
@@ -33,6 +35,8 @@ options =
         (ReqArg (\s conf -> conf { outFile = Just s }) "OUTFILE") "output file name"
     , Option "h?" ["help"]
         (NoArg (\conf -> conf { helpMode = True })) "verbose mode"
+    , Option "O" ["optlevel"]
+        (ReqArg (\s conf -> conf { optLevel = read s }) "OPTLEVEL") "optimisation level (0-4)"
     ]
 
 main :: IO ()
@@ -41,6 +45,7 @@ main = do
   let (ops, rest, err) = getOpt Permute options args
   unless (null err) $ error $ "err:" ++ show err 
   let conf = foldl' (.) id ops defaultConf -- currently not used
+  let opt = optLevel conf
   case rest of
     [] -> do
       case outFile conf of
@@ -48,43 +53,44 @@ main = do
         Just path -> do
           handle <- openFile path WriteMode
           line <- getContents
-          liftError $ interpretString line handle False
+          liftError $ interpretString line handle False opt
           hClose handle
     (name : _) -> do
       let operate handle = withFile name ReadMode $ \hIn -> do
             cont <- hGetContents hIn
-            liftError $ interpretString cont handle False
+            liftError $ interpretString cont handle False opt
       case outFile conf of
         Nothing -> operate stdout
         Just path -> withFile path WriteMode operate
 repl :: IO ()
 repl = do
+    let optLevel = 0
     liftIO $ hSetBuffering stdout NoBuffering
     liftIO $ putStr "> "
     line <- liftIO $ getLine
-    liftError $ interpretString line stdout True
+    liftError $ interpretString line stdout True optLevel
     repl
 -- compiles expr and displays the LLVM code and the result.
 -- if 'isStdOut' is True, the result will be written to the stdout.
 -- otherwise, the result will be written to 'handle'.
-interpretString :: String -> Handle -> Bool -> ExceptT String IO ()
-interpretString str handle isStdOut = do
+interpretString :: String -> Handle -> Bool -> Word -> ExceptT String IO ()
+interpretString str handle isStdOut optLevel = do
     let toks = TL.alexScanTokens str
     let exprOrErr = TP.tparse toks
     case exprOrErr of
       Left err -> liftIO (hPutStrLn stderr err)
       Right expr -> do
         liftIO $ do
-          x <- runExceptT $ interpretExpr expr handle isStdOut
+          x <- runExceptT $ interpretExpr expr handle isStdOut optLevel
           case x of
             Left err -> hPutStrLn stderr err
             Right _ -> return ()
 
-interpretExpr :: Expr -> Handle -> Bool -> ExceptT String IO ()
-interpretExpr expr handle isStdOut = do
+interpretExpr :: Expr -> Handle -> Bool -> Word -> ExceptT String IO ()
+interpretExpr expr handle isStdOut optLevel = do
   liftIO $ print expr
   newmod <- liftEither $ codegen (emptyModule "JITtest") [expr]
-  optmod <- optimize newmod (Just 3)
+  optmod <- optimize newmod (Just optLevel)
   withContextT $ \ctx -> do
    if isStdOut then do
      withModuleFromAST ctx newmod $ \mm -> do
