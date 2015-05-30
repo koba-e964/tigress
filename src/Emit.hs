@@ -64,7 +64,7 @@ cgen (ELValue lvalue) = do
   return (int64, val)
 cgen (EMinus e) = do
   operand <- checkType int64 =<< cgen e
-  val <- sub (cons (C.Int 64 0)) operand
+  val <- neg operand
   return (int64, val)
 cgen (EBin bop e1 e2) =
   case bop of
