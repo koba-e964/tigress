@@ -1,0 +1,17 @@
+let
+  function fib(x : int) = let
+    var a := 1
+    var b := 0
+  in
+    for i := 1 to x do
+      let var c := a + b in
+        a := b;
+        b := c
+      end;
+    a
+  end
+in
+  fib(20)
+end
+
+    

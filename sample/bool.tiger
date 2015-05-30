@@ -1,0 +1,8 @@
+let
+  var x := 2
+in
+  if x then
+    0
+  else
+    1
+end

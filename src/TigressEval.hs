@@ -6,6 +6,7 @@ import Control.Applicative (Applicative)
 import Control.Monad (foldM, forM, forM_, liftM, replicateM, when, (<=<))
 import Control.Monad.Cont (ContT, MonadCont, callCC, runContT)
 import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
+import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State (MonadState, StateT, evalStateT, get, modify, put)
 import Control.Monad.Trans (MonadTrans, lift)
 import Control.Monad.Primitive (PrimMonad, PrimState)
@@ -15,7 +16,6 @@ import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 import Data.Primitive.MutVar (MutVar, modifyMutVar, newMutVar, readMutVar, writeMutVar)
 import qualified Data.Traversable as DT
-import Debug.Trace (trace)
 import GHC.Arr (unsafeAt)
 
 type Pos = Int -- the position of variable
@@ -27,10 +27,16 @@ data TigState r m = TigState {
     ,tigCont :: Maybe (Value m -> TigressT r m (Value m))
 }
 
-newtype TigressT r m a = TigressT { invTigress :: ExceptT String (ContT r (StateT (TigState r m) m)) a } deriving (Functor, Applicative, Monad, MonadState (TigState r m), MonadError String, MonadCont)
+-- | Configuration for IO
+data TigConfig m = TigConfig {
+    stdoutWriter :: String -> m ()
+    ,stderrWriter :: String -> m ()
+}
+
+newtype TigressT r m a = TigressT { invTigress :: ExceptT String (ContT r (StateT (TigState r m) (ReaderT (TigConfig m) m))) a } deriving (Functor, Applicative, Monad, MonadState (TigState r m), MonadReader (TigConfig m), MonadError String, MonadCont)
 
 instance MonadTrans (TigressT r) where
-  lift = TigressT . lift . lift . lift
+  lift = TigressT . lift . lift . lift . lift
 
 -- value for tigress.
 data Value m = 
@@ -68,15 +74,20 @@ type VarMap m = Map String (VarRef m (Value m))
 
 data Function r m = 
   Function ![String] !(VarRef m (TigState r m)) !Expr
+  | FunNative !Int {- argc -} !([Value m] -> TigressT r m (Value m)) {- body -} -- for native function
 
 emptyTigState :: TigState r m
 emptyTigState = TigState {varmap = Map.empty, funcmap = Map.empty, tigCont = Nothing}
 
-runTigress :: (PrimMonad m, Monad m) => TigressT (Either String a) m a -> m (Either String a)
-runTigress m = evalStateT (runContT (runExceptT $ invTigress m) return) emptyTigState
+stdlibTigState :: (PrimMonad m, Monad m) => TigState r m -- with standard library functions
+stdlibTigState = TigState {varmap = Map.empty, funcmap = Map.fromList [("printi", FunNative 1 nativePrinti), ("not", FunNative 1 nativeNot)], tigCont = Nothing}
 
-runTigressExpr :: (PrimMonad m, Monad m) => Expr -> m (Either String FreezedValue)
-runTigressExpr expr = runTigress $ do
+
+runTigress :: (PrimMonad m, Monad m) => TigConfig m -> TigressT (Either String a) m a -> m (Either String a)
+runTigress conf m = runReaderT (evalStateT (runContT (runExceptT $ invTigress m) return) stdlibTigState) conf
+
+runTigressExpr :: (PrimMonad m, Monad m) => TigConfig m -> Expr -> m (Either String FreezedValue)
+runTigressExpr conf expr = runTigress conf $ do
   result <- eval expr
   freezeValue result
 
@@ -89,10 +100,12 @@ freezeValue (VArr ary) = liftM FVArr $ DT.mapM (freezeValue <=< readVar) ary
 freezeValue VNil       = return FVNil
 freezeValue VNone      = return FVNone
 
-
+-- | emitWarning writes the given error message to stderrWriter.
+-- | Newline is added after the given message (msg).
 emitWarning :: (PrimMonad m, Monad m) => String -> TigressT r m ()
-emitWarning msg = trace msg (return ())
-
+emitWarning msg = do
+  writer <- asks stderrWriter
+  lift (writer (msg ++ "\n"))
 newVariable :: (PrimMonad m, Monad m) => TigressT r m (VarRef m (Value m))
 newVariable = lift $ newMutVar VNone
 
@@ -117,10 +130,10 @@ getVar (LIdx lv e) = do {
   aryOrErr <- getVar lv >>= readVar;
   case aryOrErr of {
     VArr ary -> do {
-      index <- liftM fromIntegral $ ensureInt =<< eval e;
-      let {length = rangeSize $ bounds ary;};
-      when (index < 0 || index >= length) $ throwError $ "array index out of bounds: " ++ show index ++ " (length=" ++ show length ++ ")";
-      return (unsafeAt ary index);
+      ind <- liftM fromIntegral $ ensureInt =<< eval e;
+      let {lenVal = rangeSize $ bounds ary;};
+      when (ind < 0 || ind >= lenVal) $ throwError $ "array index out of bounds: " ++ show ind ++ " (length=" ++ show lenVal ++ ")";
+      return (unsafeAt ary ind);
     };
     _        -> throwError "array expected";
   };
@@ -158,7 +171,7 @@ eval (EBin op e1 e2) =
       let opInt = fromJust (lookup op ops)
       return $ VInt $ opInt i1 i2
    where
-         bToI op x y = if op x y then 1 else 0
+         bToI operator x y = if operator x y then 1 else 0
          iand x y = do
            ix <- ensureInt =<< eval x
            case ix of 
@@ -190,24 +203,26 @@ eval (EApp (Id name) args) = do
     Nothing -> throwError $ "undefined function: " ++ name
     Just (Function params tigState expr) -> do
       when (length params /= length args) (throwError $ "wrong number of arguments: " ++ show (length args) ++ " (expected: " ++ show (length params) ++ ")")
-      env <- readVar tigState
-      newenv <- foldM (\env (name, ex) -> do
-        val <- eval ex
-        newVar <- lift $ newMutVar val
-        return $ env { varmap = Map.insert name newVar (varmap env) }
-       ) env (zip params args)
-      oldenv <- get
-      put newenv
-      result <- eval expr
-      put oldenv
-      return result
+      sandbox $ do
+        oldenv <- readVar tigState
+        newenv <- foldM (\env (argName, ex) -> do
+          val <- eval ex
+          newVar <- lift $ newMutVar val
+          return $ env { varmap = Map.insert argName newVar (varmap env) }
+         ) oldenv (zip params args)
+        put newenv
+        eval expr
+    Just (FunNative argc body) -> do
+      when (argc /= length args) (throwError $ "wrong number of arguments: " ++ show (length args) ++ " (expected: " ++ show argc ++ ")")
+      argsVal <- mapM eval args
+      body argsVal
 eval (ESeq ls) = do
   results <- forM ls eval
   return $ last (VNone : results)
 eval (ERec {}) = throwError "TODO: record"
-eval (EArr _typeid length initial) = do { -- ignores type-id and creates generic array. type is not checked in this interpreter.
+eval (EArr _typeid lenExp initial) = do { -- ignores type-id and creates generic array. type is not checked in this interpreter.
   initVal <- eval initial;
-  lenVal  <- liftM fromIntegral $ ensureInt =<< eval length;
+  lenVal  <- liftM fromIntegral $ ensureInt =<< eval lenExp;
   ary <- liftM (listArray (0,lenVal-1)) $ replicateM lenVal (lift (newMutVar initVal));
   return $ VArr ary;
 }
@@ -274,15 +289,15 @@ addDecs decs = do
 -- | The original variable environment is modified, but function environment is NOT modified. 
 addDec :: (PrimMonad m, Monad m) => VarRef m (TigState r m) -> Dec -> TigressT r m ()
 addDec _newTigState (DType _) = return ()
-addDec _newTigState (DVar (VarDec (Id id) ty expr)) = do
+addDec _newTigState (DVar (VarDec (Id name) _ty expr)) = do
   var <- newVariable
   val <- eval expr
   updateVar var val
   vm <- liftM varmap get
-  let newvm = Map.insert id var vm
+  let newvm = Map.insert name var vm
   modify $ \s -> s { varmap = newvm }
   return ()
-addDec newTigState (DFun (FunDec (Id name) params ty expr)) = do
+addDec newTigState (DFun (FunDec (Id name) params _ty expr)) = do
     let fct = Function (map ( \(TypeField (Id x) _) -> x) params) newTigState expr
     fm <- liftM funcmap $ lift (readMutVar newTigState)
     let newfm = Map.insert name fct fm
@@ -297,3 +312,23 @@ showValue (VArr {})  = throwError "TODO: show array"
 showValue VNil       = return "nil"
 showValue VNone      = return "(NONE)"
 
+
+{-
+  Functions that implements functions in standard library.
+    function printi(i : int)
+    function not(i : int) : int
+-}
+
+nativePrinti :: (PrimMonad m, Monad m) => [Value m] -> TigressT r m (Value m)
+nativePrinti [val] = do
+  ival <- ensureInt val
+  writer <- asks stdoutWriter
+  lift $ writer $ show ival
+  return VNone
+nativePrinti _ = undefined
+
+nativeNot :: (PrimMonad m, Monad m) => [Value m] -> TigressT r m (Value m)
+nativeNot [val] = do
+  ival <- ensureInt val
+  return $ VInt $ if ival == 0 then 1 else 0
+nativeNot _ = undefined
