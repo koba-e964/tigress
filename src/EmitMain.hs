@@ -26,6 +26,7 @@ data Config = Config
 defaultConf :: Config
 defaultConf = Config
   { outFile = Nothing
+  , optLevel = 0
   , helpMode = False
   }
 
@@ -47,7 +48,7 @@ main = do
   let conf = foldl' (.) id ops defaultConf -- currently not used
   let opt = optLevel conf
   case rest of
-    [] -> do
+    [] ->
       case outFile conf of
         Nothing -> repl
         Just path -> do
@@ -64,34 +65,34 @@ main = do
         Just path -> withFile path WriteMode operate
 repl :: IO ()
 repl = do
-    let optLevel = 0
+    let opt = 0
     liftIO $ hSetBuffering stdout NoBuffering
     liftIO $ putStr "> "
-    line <- liftIO $ getLine
-    liftError $ interpretString line stdout True optLevel
+    line <- liftIO getLine
+    liftError $ interpretString line stdout True opt
     repl
 -- compiles expr and displays the LLVM code and the result.
 -- if 'isStdOut' is True, the result will be written to the stdout.
 -- otherwise, the result will be written to 'handle'.
 interpretString :: String -> Handle -> Bool -> Word -> ExceptT String IO ()
-interpretString str handle isStdOut optLevel = do
+interpretString str handle isStdOut opt = do
     let toks = TL.alexScanTokens str
     let exprOrErr = TP.tparse toks
     case exprOrErr of
       Left err -> liftIO (hPutStrLn stderr err)
-      Right expr -> do
+      Right expr ->
         liftIO $ do
-          x <- runExceptT $ interpretExpr expr handle isStdOut optLevel
+          x <- runExceptT $ interpretExpr expr handle isStdOut opt
           case x of
             Left err -> hPutStrLn stderr err
             Right _ -> return ()
 
 interpretExpr :: Expr -> Handle -> Bool -> Word -> ExceptT String IO ()
-interpretExpr expr handle isStdOut optLevel = do
+interpretExpr expr handle isStdOut opt = do
   liftIO $ print expr
   newmod <- liftEither $ codegen (emptyModule "JITtest") [expr]
-  optmod <- optimize newmod (Just optLevel)
-  withContextT $ \ctx -> do
+  optmod <- optimize newmod (Just opt)
+  withContextT $ \ctx ->
    if isStdOut then do
      withModuleFromAST ctx newmod $ \mm -> do
        putStrLn "***** Module before optimization *****"
