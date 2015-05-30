@@ -21,6 +21,8 @@ data Config = Config
   { outFile :: Maybe FilePath
   , helpMode :: Bool
   , optLevel :: Word
+  , execute :: Bool
+  , verbose :: Bool
   } deriving Show
 
 defaultConf :: Config
@@ -28,6 +30,8 @@ defaultConf = Config
   { outFile = Nothing
   , optLevel = 0
   , helpMode = False
+  , execute = False
+  , verbose = False
   }
 
 options :: [OptDescr (Config -> Config)]
@@ -38,6 +42,10 @@ options =
         (NoArg (\conf -> conf { helpMode = True })) "verbose mode"
     , Option "O" ["optlevel"]
         (ReqArg (\s conf -> conf { optLevel = read s }) "OPTLEVEL") "optimisation level (0-4)"
+    , Option "x" ["execute"]
+        (NoArg (\conf -> conf { execute = True })) "execute given code (this flag has no effect in repl mode)"
+    , Option "v" ["verbose"]
+        (NoArg (\conf -> conf { verbose = True })) "verbose mode (print AST)"
     ]
 
 main :: IO ()
@@ -46,7 +54,6 @@ main = do
   let (ops, rest, err) = getOpt Permute options args
   unless (null err) $ error $ "err:" ++ show err 
   let conf = foldl' (.) id ops defaultConf -- currently not used
-  let opt = optLevel conf
   case rest of
     [] ->
       case outFile conf of
@@ -54,44 +61,43 @@ main = do
         Just path -> do
           handle <- openFile path WriteMode
           line <- getContents
-          liftError $ interpretString line handle False opt
+          liftError $ interpretString line handle False conf
           hClose handle
     (name : _) -> do
       let operate handle = withFile name ReadMode $ \hIn -> do
             cont <- hGetContents hIn
-            liftError $ interpretString cont handle False opt
+            liftError $ interpretString cont handle False conf
       case outFile conf of
         Nothing -> operate stdout
         Just path -> withFile path WriteMode operate
 repl :: IO ()
 repl = do
-    let opt = 0
     liftIO $ hSetBuffering stdout NoBuffering
     liftIO $ putStr "> "
     line <- liftIO getLine
-    liftError $ interpretString line stdout True opt
+    liftError $ interpretString line stdout True (defaultConf { execute = True })
     repl
 -- compiles expr and displays the LLVM code and the result.
 -- if 'isStdOut' is True, the result will be written to the stdout.
 -- otherwise, the result will be written to 'handle'.
-interpretString :: String -> Handle -> Bool -> Word -> ExceptT String IO ()
-interpretString str handle isStdOut opt = do
+interpretString :: String -> Handle -> Bool -> Config -> ExceptT String IO ()
+interpretString str handle isStdOut conf = do
     let toks = TL.alexScanTokens str
     let exprOrErr = TP.tparse toks
     case exprOrErr of
       Left err -> liftIO (hPutStrLn stderr err)
       Right expr ->
         liftIO $ do
-          x <- runExceptT $ interpretExpr expr handle isStdOut opt
+          x <- runExceptT $ interpretExpr expr handle isStdOut conf
           case x of
             Left err -> hPutStrLn stderr err
             Right _ -> return ()
 
-interpretExpr :: Expr -> Handle -> Bool -> Word -> ExceptT String IO ()
-interpretExpr expr handle isStdOut opt = do
-  liftIO $ print expr
+interpretExpr :: Expr -> Handle -> Bool -> Config -> ExceptT String IO ()
+interpretExpr expr handle isStdOut conf = do
+  when (verbose conf) (liftIO (print expr))
   newmod <- liftEither $ codegen (emptyModule "JITtest") [expr]
-  optmod <- optimize newmod (Just opt)
+  optmod <- optimize newmod (Just (optLevel conf))
   withContextT $ \ctx ->
    if isStdOut then do
      withModuleFromAST ctx newmod $ \mm -> do
@@ -106,6 +112,7 @@ interpretExpr expr handle isStdOut opt = do
      withModuleFromAST ctx optmod $ \mm -> do
        s <- moduleLLVMAssembly mm
        hPutStr handle s
-  result <- runJIT optmod
-  liftIO $ putStrLn ("result = " ++ show result)
+  when (execute conf) $ do
+    result <- runJIT optmod
+    liftIO $ putStrLn ("result = " ++ show result)
 
