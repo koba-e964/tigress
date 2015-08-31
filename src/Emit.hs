@@ -24,6 +24,7 @@ codegenTop :: Expr -> LLVM ()
 
 codegenTop (ELet decs exprs) = do
   mapM_ declareTop decs
+  external (ptrType int8) "malloc" [(int32, AST.Name "size")]
   codegenTopSub (ELet decs exprs)
 codegenTop expr = codegenTopSub expr
 
@@ -88,7 +89,39 @@ cgen (EApp (Id name) args) = do
   call (externf (AST.Name name)) valArgs
 cgen (ESeq exprs) = cgenSeq exprs
 cgen (ERec {}) = throwError "TODO: codegen-record"
-cgen (EArr {}) = throwError "TODO: codegen-array"
+cgen (EArr typeid elen eelem) = do
+  clen <- cgen elen >>= checkType int64
+  clen32 <- instr $ AST.Trunc clen int32 []
+  bytesize <- mul clen32 (cons (C.Int 32 4))
+  ptr <- call (externf (AST.Name "malloc")) [bytesize]
+  aryPtr <- instr $ AST.BitCast (snd ptr) (ptrType int64) []
+  aryPtrAsInt <- instr $ AST.PtrToInt aryPtr int64 []
+  -- initialize elements
+  celem <- cgen eelem
+  aiCond  <- addBlock "array.init.cond"
+  aiBegin <- addBlock "array.init.begin"
+  aiExit  <- addBlock "array.init.exit"
+  var <- alloca int32
+  _ <- store var (cons (C.Int 32 0))
+  _ <- br aiCond
+  -- for.cond
+  setBlock aiCond
+  curVal <- load var
+  ccond <- le curVal clen32
+  _ <- cbr ccond aiBegin aiExit
+  -- for.begin
+  setBlock aiBegin
+  -- a[i] = elem
+  curValBody <- load var
+  dest <- instr $ AST.GetElementPtr False aryPtr [curValBody] []
+  _ <- store dest (snd celem)
+  newCurVal <- add curValBody (cons (C.Int 32 1))
+  _ <- store var newCurVal
+  _ <- br aiCond
+  -- for.exit
+  setBlock aiExit
+  
+  return (int64, aryPtrAsInt)
 cgen (EIf cond expr) = do
   ifthen <- addBlock "if.then"
   ifexit <- addBlock "if.exit"

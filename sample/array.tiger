@@ -1,0 +1,6 @@
+let
+  var ary := new int [4] of 0
+in
+  124
+end
+

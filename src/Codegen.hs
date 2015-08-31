@@ -15,6 +15,7 @@ import LLVM.General.AST (Definition(..), FloatingPointFormat(..), Instruction(..
 import LLVM.General.AST.Global (BasicBlock(BasicBlock), Parameter(Parameter), basicBlocks, functionDefaults, name, parameters, returnType)
 import qualified LLVM.General.AST.Global as G
 import qualified LLVM.General.AST as AST
+import qualified LLVM.General.AST.AddrSpace as AS
 import qualified LLVM.General.AST.Attribute as A
 import qualified LLVM.General.AST.CallingConvention as CC
 import qualified LLVM.General.AST.Constant as C
@@ -74,6 +75,10 @@ double = FloatingPointType 64 IEEE
 int1 :: AST.Type
 int1 = IntegerType 1
 
+-- 8-bit integer (char)
+int8 :: AST.Type
+int8 = IntegerType 8
+
 -- 32-bit integer
 int32 :: AST.Type
 int32 = IntegerType 32
@@ -81,6 +86,10 @@ int32 = IntegerType 32
 -- 64-bit integer
 int64 :: AST.Type
 int64 = IntegerType 64
+
+
+ptrType :: AST.Type -> AST.Type
+ptrType ty = AST.PointerType ty (AS.AddrSpace 0)
 
 -------------------------------------------------------------------------------
 -- Names
